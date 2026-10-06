@@ -19,7 +19,7 @@ Agent 干活时最难受的不是慢，是**看不见** —— 命令交出去�
 
 ## 快速开始
 
-1. **打开 exe** —— 下载 [`release/BoardWidget.exe`](release/BoardWidget.exe)，双击运行。
+1. **打开 exe** —— 下载 [`BoardWidget.exe`](https://github.com/b52tot/workbuddy-board/releases/latest/download/BoardWidget.exe)，双击运行。
 2. **注册 MCP** —— 挂件右下角点 **⚙**，在 **MCP** 那一行点「注册」。
 3. **重启 WorkBuddy** —— MCP 配置要重启才生效；重启后去连接器页点一下「信任」。
 4. **开始用** —— agent 干到哪一步、有没有卡住，就实时出现在桌面上了。

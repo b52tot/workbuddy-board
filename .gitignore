@@ -10,10 +10,12 @@ data/
 config.json
 
 # ---------------------------------------------------------------- 构建产物
-# PyInstaller 的中间目录与成品 exe，加起来约 38MB；克隆方自己构建即可
+# ★ 构建产物一律不进版本库。
+#   exe 走 GitHub Releases 分发 —— 它一旦进库，每更新一次就在历史里
+#   多留一份 15MB（实测：5 个提交就让 .git 涨到 34MB）。
+*.exe
 widget/build/
 widget/dist/
-release-site/BoardWidget.exe
 
 # 挂件运行时写出的窗口状态、自动生成的库路径、日志
 widget/state.json
