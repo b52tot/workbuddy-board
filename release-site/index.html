@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WorkBuddy Board 桌面挂件 · 下载</title>
+<style>
+  :root{
+    --bg:#12100c; --card:#1c1913; --line:#2e2a22; --line2:#3d382c;
+    --fg:#f4efe4; --fg2:#b3a992; --fg3:#8a8071;
+    --accent:#f5a524; --on-accent:#1a1305;
+    --ok:#4cc38a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; padding:40px 20px 64px;
+    background:radial-gradient(1200px 600px at 50% -12%, #241d11 0%, var(--bg) 60%);
+    color:var(--fg);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    display:flex; justify-content:center;
+  }
+  .wrap{width:100%; max-width:660px}
+
+  header{display:flex; align-items:center; gap:14px; margin-bottom:8px}
+  .logo{
+    width:46px;height:46px;flex:0 0 auto;border-radius:12px;
+    background:linear-gradient(150deg,#f5a524,#b8710d);
+    display:flex;align-items:center;justify-content:center;
+    font-size:24px; box-shadow:0 6px 20px rgba(245,165,36,.22);
+  }
+  h1{margin:0; font-size:23px; letter-spacing:.2px}
+  .sub{color:var(--fg2); font-size:13px; margin-top:2px}
+
+  .lead{color:var(--fg2); margin:18px 0 22px; font-size:14.5px}
+
+  .dl{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    background:var(--card); border:1px solid var(--line2); border-radius:14px;
+    padding:18px 20px; flex-wrap:wrap;
+  }
+  .dl .meta{display:flex; flex-direction:column; gap:3px; min-width:0}
+  .dl .fname{font-size:15px; font-weight:600}
+  .dl .fsub{font-size:12.5px; color:var(--fg3)}
+  a.btn{
+    display:inline-block; text-decoration:none; white-space:nowrap;
+    background:var(--accent); color:var(--on-accent);
+    font-weight:700; font-size:15px; padding:12px 26px; border-radius:9px;
+    transition:filter .15s, transform .05s;
+  }
+  a.btn:hover{filter:brightness(1.09)}
+  a.btn:active{transform:translateY(1px)}
+
+  h2{font-size:14px; color:var(--fg); margin:30px 0 10px; letter-spacing:.3px}
+  h2 .n{
+    display:inline-flex;width:18px;height:18px;border-radius:5px;margin-right:8px;
+    background:var(--line2); color:var(--fg2); font-size:11px;
+    align-items:center;justify-content:center; vertical-align:1px;
+  }
+  ol{margin:0; padding-left:22px; color:var(--fg2); font-size:14px}
+  ol li{margin:5px 0}
+  code{
+    background:#251f16; border:1px solid var(--line); border-radius:5px;
+    padding:1px 6px; font-size:12.5px;
+    font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;
+    color:#e8d9b8; word-break:break-all;
+  }
+  .hash{
+    display:block; background:#191510; border:1px solid var(--line); border-radius:9px;
+    padding:11px 13px; margin-top:8px; font-size:12px; line-height:1.6;
+    font-family:ui-monospace,Consolas,"Cascadia Mono",monospace;
+    color:var(--fg2); word-break:break-all;
+  }
+  .hash b{color:var(--ok); font-weight:600}
+
+  .note{
+    margin-top:12px; padding:13px 15px; border-radius:10px; font-size:13.5px;
+    background:#1f1a10; border:1px solid #3d3320; color:#dfd0b0;
+  }
+  .note b{color:var(--accent)}
+  footer{margin-top:36px; color:var(--fg3); font-size:12.5px; text-align:center}
+  @media (max-width:520px){
+    body{padding:26px 14px 48px}
+    .dl{flex-direction:column; align-items:stretch}
+    a.btn{text-align:center}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">🦖</div>
+    <div>
+      <h1>WorkBuddy Board</h1>
+      <div class="sub">桌面任务看板挂件 · 免安装单文件</div>
+    </div>
+  </header>
+
+  <p class="lead">
+    常驻桌面的小窗口，实时显示看板上的四列任务（待办 / 进行中 / 阻塞 / 已完成）。
+    单文件 exe，<b>不需要装 Python，也不需要另外部署服务</b> —— 看板后端和 MCP 端点都打包在里面了。
+  </p>
+
+  <div class="dl">
+    <div class="meta">
+      <span class="fname">BoardWidget.exe</span>
+      <span class="fsub">Windows 10/11 · 64 位 · 14.0 MB · 构建于 2026-10-06 22:48</span>
+    </div>
+    <a class="btn" href="BoardWidget.exe" download>下载 ↓</a>
+  </div>
+
+  <h2><span class="n">1</span>怎么用</h2>
+  <ol>
+    <li>下载 <code>BoardWidget.exe</code>，放到任意目录（桌面就行）。</li>
+    <li>双击运行。首次启动会自己拉起看板服务，窗口右上角是 <code>—</code>（收起）和 <code>✕</code>（收进托盘）。</li>
+    <li>系统托盘图标右键可以显示 / 隐藏挂件；右下角 <code>⚙</code> 里可换主题、调字号、接入 MCP。</li>
+  </ol>
+
+  <h2><span class="n">2</span>首次运行会被拦一下</h2>
+  <div class="note">
+    这个 exe 没有做代码签名，Windows SmartScreen 会弹「<b>Windows 已保护你的电脑</b>」。
+    点「<b>更多信息</b>」→「<b>仍要运行</b>」即可。杀毒软件也可能对 UPX 压缩壳敏感而报一次警，
+    同样属于误报。
+  </div>
+
+  <h2><span class="n">3</span>校验下载是否完整</h2>
+  <div class="hash">
+    SHA256<br><b>1ec610532eb14463860e5294cb8d0061750e881434e6c57932ecfb8b625636bf</b>
+  </div>
+  <div class="hash">
+    MD5<br>e1c40e787fd76fbf80db659b761c1c06
+  </div>
+  <p style="color:var(--fg3);font-size:12.5px;margin-top:8px">
+    在文件所在目录打开 PowerShell 敲：<code>Get-FileHash .\BoardWidget.exe -Algorithm SHA256</code>
+  </p>
+
+  <footer>
+    看板数据默认落在 <code>%APPDATA%\WorkBuddyBoardWidget\</code>，删除该目录即可清空所有本地状态。
+  </footer>
+
+</div>
+</body>
+</html>

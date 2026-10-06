@@ -1,0 +1,2040 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务挂件</title>
+<style>
+/* ============================================================
+   任务挂件 · 样式表
+   ------------------------------------------------------------
+   ★ 这是前端设计唯一需要改的文件（配合 widget.html / alt-*.html 的结构）
+      改完直接刷新浏览器即可看到效果，不需要重编译。
+
+   约束（改样式时请保留）：
+   1. 配色一律用下面 :root 里的变量，不要写死色值 ——
+      挂件必须和看板同源，这是上一版被否的原因之一。
+   2. 语义色不可改：停滞=--warn、完成=--ok、失败=--bad、进行中=--accent。
+   3. 宽度固定 320px（挂件窗口宽度），任何元素都不许把它撑出横向滚动。
+   4. 标题 2 行截断、说明 1 行截断 —— 保住"看得出是哪一个"的同时不撑高卡片。
+
+   四套主题（挂件根元素上的 class 切换）。**排版一律继承"紧凑"那一套**，
+   主题只换配色（和背景图），所以换主题不会让信息量变多变少 ——
+   「布局」那个维度已经删掉了（紧凑/宽松/卡住优先 的差异太小，不值得占一个面板位）：
+     .theme-midnight  午夜蓝     —— 冷 · 深（Win11 深色 Fluent 的方向）
+     .theme-amber     琥珀石墨   —— 暖 · 深（默认）
+     .theme-ink       亚克力白   —— 明 · 浅（白天/投屏用）
+     .theme-ex        前妻整容前 —— 绿调 + 原图当背景（两个大鼻孔是主角）
+
+   可变尺寸与透明度（挂件窗口属性，由 widget.js 写在挂件根元素上）：
+     --w          窗口宽度（可拖，默认 320）
+     --scale      字号系数，由**字号**推出（见 host.html 的 scaleFor）
+     --bg-alpha   背景不透明度 —— 只影响"背景调多透"
+     --win-alpha  **整个前端**的不透明度 —— 连文字一起透（面板里的「透明度」调的是它）
+   ============================================================ */
+
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128;
+  --line:#30363d; --line-soft:#21262d;
+  --fg:#e6edf3; --fg-2:#9198a1; --fg-3:#7d8590;
+  /* ★ --fg-3 是"最淡的那一档"，底栏的「共 N 个任务」只有 10px 就走它。
+     原来四套主题这一档全在 3.0~4.0:1（WCAG AA 要求 4.5:1）——
+     也就是"颜色确实换了、但换完读不清"。下面四套都按 ≥4.5:1 重算过，
+     色相/饱和度保持原样，只把明度挪了一档。核算法见 .workbuddy/tmp/contrast.py。 */
+  --accent:#4493f8; --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+
+  --radius:8px; --radius-lg:12px;
+  --w:320px;
+  --scale:1;
+  --bg-alpha:1;
+  --win-alpha:1;          /* 整个前端的不透明度 */
+  --fs-title:12.5px;
+  --fs-meta:10.5px;
+  --pad-card:8px 10px;
+  --gap-card:6px;
+}
+
+/* 尺寸相关的量一律写成 calc(x * var(--scale))，
+   这样"放大"时字号与间距同步长，不会出现大窗口里挤着小字。 */
+.tw{ font-size:calc(var(--fs-meta) * var(--scale)) }
+
+/* ---------------------------------------------------------- 四套主题
+   排版参数四套**完全一致**（就是原来"紧凑"那一套），只有颜色不同 ——
+   这样切换主题时信息密度不变，比较的才是主题本身。 */
+.theme-midnight, .theme-amber, .theme-ink, .theme-ex{
+  --fs-title:12.5px; --fs-meta:10.5px; --pad-card:8px 10px; --gap-card:6px;
+}
+
+/* 午夜蓝 —— 冷 · 深 */
+.theme-midnight{
+  --bg:#0a0f1c; --surface:#101728; --surface-2:#182135;
+  --line:#26324a; --line-soft:#1a2334;
+  --fg:#e9eefc; --fg-2:#95a3c2; --fg-3:#7581a4;   /* fg-3 3.82→4.62 */
+  --accent:#4f8dfd; --ok:#3fd07a; --bad:#ff6b6b; --warn:#e8b339;
+  --on-accent:#ffffff;
+}
+
+/* 琥珀石墨 —— 暖 · 深（默认）。
+   整体调暖（不只是强调色），否则在缩略图/远看下和午夜蓝分不出来。 */
+.theme-amber{
+  --bg:#17130c; --surface:#221b11; --surface-2:#2e2416;
+  --line:#3d3121; --line-soft:#2a2115;
+  --fg:#f7f0e2; --fg-2:#b3a488; --fg-3:#968360;   /* fg-3 3.75→4.63 */
+  --accent:#f5a524; --ok:#4cc38a; --bad:#ff7a6b; --warn:#f5a524;
+  --on-accent:#1a1305;      /* 琥珀底上白字读不清 */
+}
+
+/* 亚克力白 —— 明 · 浅。
+   ★ 浅色下文字色必须**显式钉住**：widget.css 里 .ttl/.ctitle/.gtitle 原本都没写
+     color，靠继承宿主页面；深色主题上看不出来，浅底立刻露馅（白底 + 宿主浅灰字）。 */
+.theme-ink{
+  --bg:#f4f7fb; --surface:#ffffff; --surface-2:#eef2f8;
+  --line:#dbe2ec; --line-soft:#e8edf5;
+  --fg:#16202f; --fg-2:#5c6779; --fg-3:#6a758a;   /* fg-3 3.02→4.64，白底上这条最要紧 */
+  --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
+  --on-accent:#ffffff;
+}
+
+/* 前妻整容前 —— 绿调 + 原图当背景。
+   令牌沿用用户那条对话里的取名（--ex-*），两个会话将来合流不会打架。 */
+.theme-ex{
+  --bg:#0d1c10; --surface:#132619; --surface-2:#1b3320;
+  --line:#2b4a2e; --line-soft:#1d3521;
+  --fg:#e8f2e2; --fg-2:#9fb99a; --fg-3:#779170;   /* fg-3 4.04→4.60 */
+  --accent:#eed77b; --ok:#acd18b; --bad:#e8735f; --warn:#e0a53c;
+  --on-accent:#141a0d;      /* 腹部黄底上白字读不清 */
+  --ex-matcha:#acd18b; --ex-chip:#96bbe4; --ex-ink:#2d3013;
+  --ex-yolk:#eed77b; --ex-paper:#ffffff;
+}
+/* 浅色主题下把文字色钉死（理由见上） */
+.theme-ink .widget{ color:var(--fg) }
+
+*{box-sizing:border-box}
+
+/* ---------------------------------------------------------- 挂件外框 */
+.widget{
+  width:var(--w);
+  /* 半透明时背景要真的透出去，文字保持不透明 ——
+     挂件常驻桌面，挡住后面的东西比看不清更烦人。 */
+  background:color-mix(in srgb, var(--bg) calc(var(--bg-alpha) * 100%), transparent);
+  border:1px solid color-mix(in srgb, var(--line) calc(var(--bg-alpha) * 100% + 10%), transparent);
+  border-radius:var(--radius-lg);
+  overflow:hidden; display:flex; flex-direction:column;
+  max-height:var(--maxh, 460px);   /* 常驻窗口的高度上限，超出内部滚动 */
+  backdrop-filter:blur(6px);
+}
+.widget.mini{ max-height:none }
+
+/* 宽到一定程度就并排两列 —— 「放大」的意义是看到更多，而不是字更大 */
+.widget.wide > .cols2{
+  display:grid; grid-template-columns:1fr 1fr; gap:0;
+}
+.widget:not(.wide) > .cols2{ display:block }
+
+/* 半透明时，卡片面也要跟着透，否则只有外壳透明、里面还是实心 */
+.widget{ --surf:color-mix(in srgb, var(--surface) calc(var(--bg-alpha) * 100%), transparent); }
+.widget .bar,
+.widget .ghead:hover,
+.widget .card,
+.widget .dhead,
+.widget .minibar,
+.widget .srcbar,
+.widget .tag,
+.widget .btn{ background-color:var(--surf) }
+
+/* ---------------------------------------------------------- 顶栏 */
+.bar{
+  display:flex; align-items:center; gap:9px;
+  padding:calc(9px * var(--scale)) calc(11px * var(--scale)); background:var(--surface);
+  border-bottom:1px solid var(--line); flex:0 0 auto;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.dot.bad{background:var(--bad)}
+.ttl{font-size:calc(12.5px * var(--scale)); font-weight:600; flex:1; white-space:nowrap;
+     overflow:hidden; text-overflow:ellipsis}
+.pill{font-size:calc(11px * var(--scale)); padding:1.5px 7px; border-radius:999px;
+      background:var(--surface-2); border:1px solid var(--line); color:var(--fg-2);
+      white-space:nowrap; font-variant-numeric:tabular-nums}
+.pill.alert{color:var(--warn); border-color:#5a4200;
+            background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.pill.ok{color:var(--ok); border-color:#1c4d28;
+         background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.icobtn{width:22px;height:22px;border:1px solid transparent;border-radius:6px;
+        background:transparent;color:var(--fg-3);cursor:pointer;font-size:calc(12px * var(--scale));
+        display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.icobtn:hover{border-color:var(--line);color:var(--fg)}
+
+/* 数据来源角标：live / sample。原型期需要它 —— 免得把样例数据当成真的 */
+.srcbar{
+  font-size:calc(10px * var(--scale)); color:var(--fg-3); background:var(--surface-2);
+  border-bottom:1px solid var(--line-soft); padding:calc(2.5px * var(--scale)) calc(11px * var(--scale));
+  display:flex; gap:6px; align-items:center;
+}
+.srcbar .live{color:var(--ok)}
+.srcbar .demo{color:var(--accent)}
+.srcbar .sample{color:var(--warn)}
+
+/* ---------------------------------------------------------- 完成率条 */
+.rate{height:3px;background:var(--surface-2);flex:0 0 auto}
+.rate i{display:block;height:100%;background:var(--accent)}
+
+/* ---------------------------------------------------------- 列组 */
+.grp{flex:0 0 auto}
+.grp + .grp{border-top:1px solid var(--line-soft)}
+.ghead{display:flex;align-items:center;gap:7px;padding:calc(7px * var(--scale)) calc(11px * var(--scale));
+       cursor:pointer;user-select:none}
+.ghead:hover{background:var(--surface)}
+.cbar{width:3px;height:12px;border-radius:2px;background:var(--fg-3);flex:0 0 auto}
+.gtitle{font-size:calc(12px * var(--scale));font-weight:600;flex:1}
+.gcount{font-size:calc(11px * var(--scale));color:var(--fg-3);font-variant-numeric:tabular-nums;
+        flex:0 0 auto}
+.gwip{font-size:calc(10.5px * var(--scale));color:var(--warn);flex:0 0 auto}
+/* 列头里的停滞角标（替代原先"把停滞任务搬出本列另立分区"的做法） */
+.gstall{font-size:calc(10.5px * var(--scale));color:var(--warn);
+        font-variant-numeric:tabular-nums;flex:0 0 auto}
+.chev{font-size:calc(9px * var(--scale));color:var(--fg-3)}
+
+/* 主题 C 的「卡住」分区：橙底表头，一眼压过其他组 */
+.prio-group > .ghead{background:color-mix(in srgb,var(--warn) 9%,transparent);                     border-left:3px solid var(--warn)}
+.prio-group > .ghead .gtitle{color:var(--warn)}
+
+/* ---------------------------------------------------------- 任务卡片 */
+.cards{padding:0 calc(8px * var(--scale)) calc(8px * var(--scale))}
+
+/* ★★ 这条曾经**漏了**，是"收起/展开箭头点了没反应"的真正原因。
+ *
+ *   JS 侧一直在做 `cards.classList.toggle('hidden')` —— 代码没错、class 也确实
+ *   来回切换了，但 CSS 里**从来没有 `.hidden` 这条规则** ⇒ 界面一个像素都不动。
+ *   而当时的测试只断言 `classList.contains('hidden')`，于是全绿。
+ *
+ *   教训：**断言"状态变了"不等于断言"用户看得见的变化"。**
+ *   凡是靠 class 控制显隐/显眼的地方，测试就必须量**计算后的样式或尺寸**，
+ *   不能只读 class 列表。
+ *
+ *   写成 `.cards.hidden` 而不是裸 `.hidden`：限定作用域，
+ *   避免将来别处用到同名 class 时被意外隐藏。
+ */
+.cards.hidden{display:none}
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-left:3px solid var(--fg-3); border-radius:var(--radius);
+  padding:var(--pad-card); margin-bottom:var(--gap-card); cursor:pointer;
+}
+.card:hover{border-color:var(--accent);border-left-color:var(--accent)}
+.card:last-child{margin-bottom:0}
+.card.stall{border-left-color:var(--warn)}      /* 停滞：橙，不是红 */
+.card.done{border-left-color:var(--ok);opacity:.72}
+
+.ctitle{font-size:calc(var(--fs-title) * var(--scale));font-weight:500;line-height:1.4;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cdesc{font-size:calc((var(--fs-meta) + 1px) * var(--scale));color:var(--fg-3);margin-top:3px;
+       display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+
+/* 进度条：warn 色 = "在动"；与顶栏完成率 accent 色刻意分开 */
+.pwrap{margin-top:6px}
+.pbar{height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--warn);border-radius:2px}
+.pbar.ok i{background:var(--ok)}
+.pmeta{display:flex;gap:6px;align-items:baseline;margin-top:3px;
+       font-size:calc(var(--fs-meta) * var(--scale));color:var(--fg-3);font-variant-numeric:tabular-nums}
+.pmeta .pc{color:var(--fg-2);font-weight:600}
+.pmeta .pnum{margin-right:auto}
+.pmeta .pmsg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52%}
+
+.stallmsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+          font-size:calc(var(--fs-meta) * var(--scale));
+          color:var(--warn);background:color-mix(in srgb,var(--warn) 11%,transparent)}
+.cmeta{display:flex;gap:6px;align-items:center;margin-top:6px;
+       font-size:calc(var(--fs-meta) * var(--scale));color:var(--fg-3);flex-wrap:wrap}
+.tag{background:var(--surface-2);border:1px solid var(--line-soft);
+     border-radius:4px;padding:0 4px;color:var(--fg-2)}
+.prio{color:var(--bad);font-weight:600}
+.el{font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+
+/* ---------------------------------------------------------- 详情视图 */
+.dhead{display:flex;align-items:center;gap:8px;padding:calc(9px * var(--scale)) calc(11px * var(--scale));
+       background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto}
+.dtitle{font-size:calc(var(--fs-title) * var(--scale));font-weight:600;flex:1;line-height:1.35}
+.dbody{padding:calc(10px * var(--scale)) calc(11px * var(--scale));overflow-y:auto}
+.kv{display:grid;grid-template-columns:52px minmax(96px,1fr);gap:5px 9px;
+    font-size:calc((var(--fs-meta) + 1px) * var(--scale))}
+.kv .k{color:var(--fg-3);white-space:nowrap}
+.kv .v{color:var(--fg);word-break:break-word}
+/* ★ 值列必须有个下限。
+   原来是 `grid-template-columns:52px 1fr` —— 而 `1fr` 的轨道下限是 `auto`，
+   也就是 **min-content**：容器一被压窄，这一列可以一路缩到「一个汉字宽」，
+   于是中文就变成一字一行（用户报的"状态文字竖着排列"）。
+   改成 minmax(96px, 1fr)：宁可让容器横向溢出/出现滚动条，
+   也不要把内容变得没法读 —— 可读性优先于"不溢出"。
+   `.k` 加 nowrap 是为了让标签（所在列/优先级/状态）保持单行，
+   否则短标签也会跟着折行，把两列的对齐关系带乱。 */
+.sect{margin-top:11px;padding-top:9px;border-top:1px solid var(--line-soft)}
+.sect .h{font-size:calc(11px * var(--scale));color:var(--fg-3);margin-bottom:5px}
+.ev{display:flex;gap:7px;font-size:calc(11px * var(--scale));padding:2.5px 0;
+    border-bottom:1px solid var(--line-soft)}
+.ev:last-child{border-bottom:0}
+.ev .t{color:var(--fg-3);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ev .k2{color:var(--accent);flex:0 0 auto;min-width:52px}
+.ev .d{color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------------------------------------------------------- 收起态 */
+.minibar{display:flex;align-items:center;gap:8px;padding:calc(8px * var(--scale)) calc(12px * var(--scale));
+         background:var(--surface);cursor:pointer}
+.mini .txt{font-size:calc(12px * var(--scale));flex:1}
+.mini .txt .num{font-weight:600;font-variant-numeric:tabular-nums}
+.mini .txt .alert{color:var(--warn)}
+
+/* ---------------------------------------------------------- 服务不可达 */
+.err{padding:16px 13px;text-align:center}
+.err .e1{font-size:calc(12.5px * var(--scale));color:var(--bad);margin-bottom:5px}
+.err .e2{font-size:calc(11.5px * var(--scale));color:var(--fg-3);margin-bottom:11px;line-height:1.5}
+.err code{background:var(--surface-2);padding:0 4px;border-radius:3px;
+          font-size:calc(11px * var(--scale));color:var(--fg-2)}
+.btn{font:inherit;font-size:calc(11.5px * var(--scale));padding:4px 11px;border-radius:6px;
+     background:var(--surface-2);color:var(--fg);border:1px solid var(--line);cursor:pointer}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* 空态（真的一个任务都没有）—— 必须与「服务不可达」长得完全不同 */
+.empty{padding:22px 13px;text-align:center;color:var(--fg-3);font-size:calc(12px * var(--scale))}
+.empty .big{font-size:calc(15px * var(--scale));color:var(--fg-2);margin-bottom:5px}
+
+/* 失败：用 bad 色，不是 warn —— 「卡住」和「失败」要人做的事不同
+   （卡住=去看看，失败=得重跑或排查）。两者长得一样就是信息缺失。 */
+.failmsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+         font-size:calc(var(--fs-meta) * var(--scale));
+         color:var(--bad);background:color-mix(in srgb,var(--bad) 11%,transparent)}
+
+/* 子步骤：扁平列表，不做缩进/树。三种状态靠符号+颜色区分。 */
+.step{display:flex;gap:6px;align-items:baseline;
+      font-size:calc(var(--fs-meta) * var(--scale) * 1.08);padding:2px 0}
+.step .sm{width:11px;flex:0 0 auto;text-align:center}
+.step.done{color:var(--fg-3)}
+.step.done .sm{color:var(--ok)}
+.step.running{color:var(--fg)}
+.step.running .sm{color:var(--warn)}
+.step.pending,
+.step.pending .sm{color:var(--fg-3)}
+
+/* ---- 「加一个可选字段，卡片就多一条信息」用到的样式 ---- */
+
+/* A4 截止时间：accent 色（"还有时间"），超期转 bad */
+.duemsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+        font-size:calc(var(--fs-meta) * var(--scale));
+        color:var(--accent);background:color-mix(in srgb,var(--accent) 11%,transparent)}
+.duemsg.over{color:var(--bad);background:color-mix(in srgb,var(--bad) 11%,transparent)}
+
+/* A5 执行者 */
+.who{color:var(--accent)}
+
+/* A3 步骤 / A2 产物的卡片内计数 */
+.stepsc,.artsc{color:var(--fg-3);font-variant-numeric:tabular-nums}
+
+/* A2 产物列表（详情里） */
+.art{display:flex;gap:6px;align-items:baseline;padding:2.5px 0;
+     font-size:calc(var(--fs-meta) * var(--scale) * 1.08)}
+.art .ai{flex:0 0 auto}
+.art .an{color:var(--fg)}
+.art .ad{color:var(--fg-3);margin-left:auto;flex:0 0 auto}
+
+/* ============================================================
+   「前妻整容前」的背景大图
+   ------------------------------------------------------------
+   ★ 参数与结构**照抄**用户另一条对话里已经做好的实现
+     （outputs/exwife-mode/exwife.css），因为他们那边是**量过**的：
+       · 鼻孔面积 215/213，是眼睛（23/20）的十倍 ⇒ 它就是这张脸的辨识锚点
+       · 全身图有几何死结（保鼻孔就必切眼睛）⇒ 只能用脸特写或让脸落进顶部带
+       · 面部遮罩坐标 (75%,30%) 与脸中心横跨 x 61%~96% 都是实测值
+     自己重推一遍只会更差，还会把人家踩过的坑再踩一遍。
+
+   两层结构（关键）：
+     i = 虚化整图，做氛围
+     b = **同几何**（同一套 --bgw/--bgx/--bgtop/background-size）的低虚化高对比副本，
+         只用一个径向遮罩把"脸"透出来 ⇒ 观感是"背景虚化、主体清晰"，
+         而且不需要新素材、不需要算偏移。
+   ★ 锚点用 **top** 不用 bottom：--bgy 是相对挂件高度的百分比，
+     任务一多挂件变高，整张图会被推下去，头顶那条弧线就掉进卡片墙里了。
+   ============================================================ */
+.theme-ex .ex-bg{
+  position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0;
+  border-radius:inherit;
+  --bgimg:url(data:image/png;base64,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);
+  --bgar:.8368;                    /* 200/239，素材原始比例 */
+  /* ★ 尺寸按**挂件高度**算，不按宽度百分比。
+     踩过的坑：--bgw:180% 是按宽度算的**固定**值，而挂件高度随任务数变 ——
+     任务少的时候（3~4 个）图相对过大，整张脸糊满挂件，看着像一块绿斑、
+     读不出是一只恐龙；任务多的时候又偏小。
+     高度百分比 `height:125%` 是跟容器走的 ⇒ 任务多少构图都不跑偏。 */
+  --bgh:125%; --bgx:-13%; --bgtop:-8%;
+  --bgblur:2.2px; --bgop:.52; --bgsat:1.24; --bgbri:1.00;
+  --facex:75%; --facey:30%; --facerx:15%; --facery:19%; --facecore:55%;
+  --faceblur:.28; --faceboost:.24; --facecon:1.18;
+}
+.theme-ex .widget{ position:relative }
+.theme-ex .ex-bg i, .theme-ex .ex-bg b{
+  position:absolute; z-index:0; top:var(--bgtop); right:var(--bgx);
+  height:var(--bgh); width:auto; aspect-ratio:var(--bgar);
+  background-image:var(--bgimg); background-size:contain;
+  background-repeat:no-repeat; background-position:right top;
+}
+.theme-ex .ex-bg i{
+  filter:blur(var(--bgblur)) saturate(var(--bgsat)) brightness(var(--bgbri));
+  opacity:var(--bgop);
+}
+.theme-ex .ex-bg b{
+  filter:blur(calc(var(--bgblur) * var(--faceblur))) saturate(var(--bgsat))
+         brightness(var(--bgbri)) contrast(var(--facecon));
+  opacity:calc(var(--bgop) + var(--faceboost));
+  -webkit-mask-image:radial-gradient(ellipse var(--facerx) var(--facery)
+    at var(--facex) var(--facey), #000 var(--facecore), transparent 100%);
+  mask-image:radial-gradient(ellipse var(--facerx) var(--facery)
+    at var(--facex) var(--facey), #000 var(--facecore), transparent 100%);
+}
+/* 遮罩只压顶栏那一条（那里字小又密），中间和下部让给图。
+   ★ 压到脸上会把脸压平 —— 只剩两个鼻孔、读不出是张脸。 */
+.theme-ex .ex-bg::after{
+  content:''; position:absolute; inset:0; z-index:1;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 62%, transparent) 0%,
+                    color-mix(in srgb, var(--bg) 20%, transparent) 12%, transparent 24%),
+    linear-gradient(0deg, color-mix(in srgb, var(--bg) 58%, transparent) 0%,
+                    transparent 13%);
+}
+/* 内容抬到背景之上。★ 漏了这条会让卡片被 .ex-bg::after（z-index:1）盖住，
+   界面只剩一张大脸 —— 而且不报错。 */
+.theme-ex .widget > *:not(.ex-bg){ position:relative; z-index:3 }
+
+/* 背景模式下的"让路"规则：卡片/顶栏/数据源条各自不透明时，
+   背景图会**明明在、但看不见**。这几条就是让它们透出来。 */
+.theme-ex .card{
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 58%), transparent);
+  border-top-color:transparent;
+  border-right-color:color-mix(in srgb, var(--line) 70%, transparent);
+  border-bottom-color:color-mix(in srgb, var(--line) 70%, transparent);
+  backdrop-filter:blur(4px);
+}
+.theme-ex .bar{
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 24%), transparent);
+  backdrop-filter:blur(5px);
+}
+/* ★ 数据源条原本是**完全不透明**的 —— 18px 高的一堵墙，正好把脸挡掉。
+   放宽到 55%：它只有 10px 小字，读得清；信息一个字没动，仍是审计凭据。 */
+.theme-ex .srcbar{
+  background:color-mix(in srgb, var(--surface-2) calc(var(--bg-alpha,1) * 55%), transparent);
+}
+.theme-ex .ghead:hover{ background:color-mix(in srgb, var(--surface-2) 45%, transparent) }
+/* 底部净空：不留这条，最后一张卡片正好压在脸上，"大图"永远只露半张 */
+.theme-ex .cols2{ padding-bottom:calc(26px * var(--scale, 1)) }
+
+/* ---------------------------------------------------------- 整个前端透明度
+   ★ 面板里那个「透明度」调的是**整个前端**（连文字一起透），
+     不是只把背景色调淡 —— 后者几乎看不出来，用户报过"调了基本无效"。
+     实现放在 html 上，这样挂件外框的边框与圆角也一起参与。 */
+html{ opacity:var(--win-alpha, 1) }
+
+</style>
+<style>
+/* ============================================================
+   宿主页面：给挂件提供窗口外壳
+   ------------------------------------------------------------
+   与判据有关的两点，写在最前面：
+
+   1) 拖拽区只标在**标题和底栏**上，不标整窗 ——
+      整窗可拖会把「点卡片」当成「拖窗口」，详情页永远打不开，
+      而且不报错，只表现为"点了没反应"。
+
+   2) 「连不上」和「没有任务」必须是两个不同的视图。
+      挂件最常见的翻车不是显示错，而是**空白** ——
+      空白让人分不清是没数据还是服务挂了。
+
+   挂件本体样式全部来自 ../widget.css，宿主的 CSS 只做外围。
+   ============================================================ */
+html,body{
+  margin:0;height:100%;background:transparent;overflow:hidden;
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--fg);user-select:none;
+}
+body{display:flex;flex-direction:column}
+
+#app{flex:1;overflow-y:auto;overflow-x:hidden}
+#app::-webkit-scrollbar{width:8px}
+#app::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+#app::-webkit-scrollbar-track{background:transparent}
+/* 挂件在宿主里去掉自身圆角与外边距：窗口已经是圆角的了 */
+#app .widget{
+  border-radius:12px;max-height:none!important;
+  border-color:var(--line);
+}
+
+/* MCP 注册引导条。
+   放在数据源条下面（不挡顶栏、不挡第一张卡）。配色走 warn 那一档 ——
+   它不是错误，是"有一件事还没做"，所以用琥珀而不是红。 */
+.mcpguide{
+  margin:0 8px 6px; padding:9px 11px; border-radius:8px;
+  background:color-mix(in srgb, var(--warn, #d29922) 13%, transparent);
+  border:1px solid color-mix(in srgb, var(--warn, #d29922) 42%, transparent);
+}
+.mcpguide.done{
+  background:color-mix(in srgb, var(--ok, #3fb950) 12%, transparent);
+  border-color:color-mix(in srgb, var(--ok, #3fb950) 38%, transparent);
+}
+.mcpguide .mg-h{font-size:12px; font-weight:600; color:var(--fg); margin-bottom:3px}
+.mcpguide .mg-b{font-size:11px; line-height:1.55; color:var(--fg-2)}
+.mcpguide .mg-b b{color:var(--fg)}
+.mcpguide .mg-a{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
+.mcpguide button{
+  font:inherit; font-size:11px; padding:3px 11px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--line, #30363d);
+  background:color-mix(in srgb, var(--surface-2, #1c2128) 85%, transparent);
+  color:var(--fg-2);
+}
+.mcpguide button.mg-go{
+  background:var(--warn, #d29922); border-color:var(--warn, #d29922);
+  color:#16130a; font-weight:600;
+}
+.mcpguide button.mg-go:disabled{opacity:.6; cursor:default}
+.mcpguide.done button.mg-go{background:var(--ok, #3fb950); border-color:var(--ok, #3fb950)}
+
+/* 拖拽区：只标标题，不标按钮 */
+.drag-area{cursor:default}
+
+/* Windows 风格的窗口键：右上角那两颗。
+   关闭键悬停变红（e81123 是 Windows 的关闭红）—— 这是 Windows 用户
+   "能一眼认出这是关闭"的唯一线索，缺了它就只是两个符号。 */
+.winbtn{font-size:14px; line-height:1; padding:2px 7px; border-radius:6px}
+.winbtn-close:hover{
+  background:#e81123 !important; color:#fff !important; border-color:#e81123 !important;
+}
+
+/* ---------------------------------------------------------- 底部操作条 */
+/* ★ 底栏一律用主题变量。原来这里写死了 #161b22 / #6e7681 / #30363d / #4493f8 ——
+   于是"换主题只有中间变了、底下一成不变"。 */
+#foot{
+  flex:0 0 auto;display:flex;align-items:center;gap:6px;
+  padding:3px 8px 4px;
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 100%),transparent);
+  border-top:1px solid color-mix(in srgb, var(--line-soft) calc(var(--bg-alpha,1) * 100% + 10%),transparent);
+  border-radius:0 0 12px 12px;
+}
+#foot .fstat{flex:1;font-size:10px;color:var(--fg-3);overflow:hidden;
+             text-overflow:ellipsis;white-space:nowrap}
+#foot .fb{
+  width:20px;height:18px;border:1px solid transparent;border-radius:4px;
+  background:transparent;color:var(--fg-3);cursor:pointer;font-size:11px;
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+#foot .fb:hover{border-color:var(--line);color:var(--fg)}
+#foot .fb.on{color:var(--accent)}
+
+/* 缩放柄：无边框窗口没有系统边框可拖，得自己给一个 */
+#grip{
+  position:fixed;right:2px;bottom:2px;width:14px;height:14px;
+  cursor:nwse-resize;z-index:20;
+  background:linear-gradient(135deg,transparent 45%,var(--fg-3) 45%,var(--fg-3) 55%,transparent 55%,
+                             transparent 70%,var(--fg-3) 70%,var(--fg-3) 80%,transparent 80%);
+}
+
+/* ---------------------------------------------------------- 设置面板 */
+/* 设置面板同样一律用主题变量（理由见底栏那条注释） */
+#panel{
+  position:absolute;left:0;right:0;bottom:26px;z-index:30;
+  background:var(--surface);border-top:1px solid var(--line);
+  padding:9px 11px;display:none;flex-direction:column;gap:8px;
+  color:var(--fg-2);
+}
+#panel.show{display:flex}
+#panel .pl{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg-2)}
+#panel .pl .k{min-width:44px;color:var(--fg-3)}
+#panel input[type=range]{flex:1;accent-color:var(--accent);height:16px}
+#panel .v{font-size:11px;color:var(--fg);min-width:78px;font-variant-numeric:tabular-nums}
+#panel .sw{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--fg)}
+#panel .sw input{accent-color:var(--accent);cursor:pointer}
+#panel .seg{display:flex;gap:3px;flex-wrap:wrap}
+#panel .seg button{
+  font:inherit;font-size:11px;padding:2px 8px;border-radius:4px;
+  background:var(--surface-2);color:var(--fg-2);border:1px solid var(--line);cursor:pointer;
+}
+/* 选中态用 --on-accent（各主题自己定），否则琥珀底 + 白字读不清 */
+#panel .seg button.on{
+  background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff);
+  font-weight:600;
+}
+
+/* MCP 状态与后续引导。步骤必须**摆出来**而不是只在日志里 ——
+   "注册完了"和"能用上"中间隔着重启与信任两步，不说清楚用户就会以为没接上。 */
+#panel #vmcp{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 状态色也走主题变量：上一版写死 #3fb950/#d29922，浅色主题下白底绿字只有 2.5:1，
+   "已注册"三个字几乎看不见 —— 和底栏是同一类失效。 */
+#panel #vmcp.ok{color:var(--ok)}
+#panel #vmcp.warn{color:var(--warn)}
+#panel #mcpsteps{display:none;margin:2px 0 0 52px;padding:7px 9px;border-radius:6px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--fg-2);font-size:11px;
+  line-height:1.65;white-space:pre-wrap;word-break:break-word}
+#panel #mcpsteps.show{display:block}
+
+/* 启动期：避免白闪 */
+#boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      color:var(--fg-3);font-size:12px;background:var(--bg)}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<div id="foot">
+  <span class="fstat" id="fstat">启动中…</span>
+  <span class="fsign" id="fsign"></span>
+  <!-- 右下角 = **应用动作**：↗ 浏览器打开、⚙ 设置。
+       ✕ 已经挪到右上角（和窗口控制放一起）—— Windows 用户找关闭一律去右上角，
+       摆在右下角是反直觉的，而且和 ⤓ 语义重复。 -->
+  <button class="fb" id="openboard" data-act="board" title="在浏览器打开完整看板">↗</button>
+  <button class="fb" id="gear" title="设置">⚙</button>
+</div>
+
+<div id="panel">
+  <div class="pl"><span class="k">宽度</span>
+    <input type="range" id="rf" min="10" max="18" step="0.5">
+    <span class="v" id="vf"></span>
+  </div>
+  <div class="pl"><span class="k">透明度</span>
+    <input type="range" id="ra" min="25" max="100" step="1">
+    <span class="v" id="va"></span>
+  </div>
+  <div class="pl"><span class="k">置顶</span>
+    <label class="sw"><input type="checkbox" id="rontop"><span>始终在最前</span></label>
+  </div>
+  <!-- 主题取代了原来的「布局」。原来那三档（紧凑/宽松/卡住优先）现在都按紧凑排版，
+       差异只剩配色与背景 —— 那才是用户真要选的东西。名字一字不改。 -->
+  <div class="pl"><span class="k">主题</span>
+    <span class="seg" id="theme">
+      <button data-t="theme-midnight">午夜蓝</button>
+      <button data-t="theme-amber">琥珀石墨</button>
+      <button data-t="theme-ink">亚克力白</button>
+      <button data-t="theme-ex">前妻整容前</button>
+    </span>
+  </div>
+
+  <!-- MCP 注册。挂件是"看"的，MCP 是"记"的 —— agent 能不能把干的活写进看板，
+       全看这一步接没接上。所以不藏，直接摆在设置里，并带后续引导。 -->
+  <div class="pl"><span class="k">MCP</span>
+    <span class="v" id="vmcp" style="min-width:0">读取中…</span>
+    <button class="fb" id="mcpbtn">注册</button>
+  </div>
+  <div id="mcpsteps"></div>
+
+  <!-- 版本戳。不是装饰，是判据：这轮出过"改了没生效"的困惑 ——
+       文件明明换新了，可新功能只在"未注册的首次启动"才出现，
+       界面上又答不出"我跑的是哪一版"，于是被判断成"桌面未更新"。
+       有了这一行，和 dist 的 mtime/体积一对就知道。 -->
+  <div class="pl"><span class="k">版本</span>
+    <span class="v" id="vbuild" style="min-width:0">—</span></div>
+</div>
+
+<div id="grip" title="拖动调整大小"></div>
+<div id="boot">正在读取看板…</div>
+
+<script>
+/* ============================================================
+   任务挂件 · 渲染逻辑
+   ------------------------------------------------------------
+   数据来源：window.WB_DATA（由 refresh-data.py 生成）
+   数据契约：/api/board 的返回结构，见 README.md
+
+   三个渲染入口：
+     renderWidget(el, state)   渲染一个挂件到容器 el
+       state: 'expanded' | 'detail' | 'mini' | 'unreachable' | 'empty'
+     state 之外的派生量（停滞/耗时/进度）全部从数据算，不写死。
+
+   改这个文件时请保持：所有显示出来的数字都能在 WB_DATA 里找到出处。
+   ============================================================ */
+(function () {
+  'use strict';
+
+  var D = {}, BOARD = {}, EVENTS = {};
+  var COLS = [], BYCOL = {}, STALLED = {}, TERM = {}, ALL = [];
+
+  /**
+   * 装载（或重载）数据。
+   *
+   * ★ 为什么要有这个函数、而不是在加载期把数据读成常量：
+   *   宿主是长驻的，会周期性拉到新数据。若数据在 IIFE 里被固化成常量，
+   *   轮询到新数据后页面上还是旧的 —— 表现成"挂件不刷新"，而且不会报错。
+   *   抽成函数后，宿主只需 `WB_RELOAD(newData)` 就能换一整套数据。
+   */
+  function loadData(data) {
+    D = data || window.WB_DATA || {};
+    BOARD = D.board || {};
+    EVENTS = D.events || {};
+
+    COLS = BOARD.columns || [];
+    BYCOL = BOARD.tasks_by_column || {};
+    STALLED = {};
+    (BOARD.stalled_ids || []).forEach(function (id) { STALLED[id] = true; });
+    TERM = {};
+    COLS.forEach(function (c) { if (c.is_terminal) TERM[c.id] = true; });
+    ALL = [];
+    COLS.forEach(function (c) {
+      (BYCOL[c.id] || []).forEach(function (t) { ALL.push(t); });
+    });
+  }
+
+  // 初次装载（原型页靠这行；宿主会在拿到数据后再调一次 WB_RELOAD）
+  loadData(window.WB_DATA);
+
+  function taskById(id) {
+    for (var i = 0; i < ALL.length; i++) if (ALL[i].id === id) return ALL[i];
+    return null;
+  }
+
+  /* ---------------------------------------------------------- 工具 */
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  /** 秒 → 「2小时18分」。超过一天显示「1天3小时」。 */
+  function dur(sec) {
+    if (sec == null || isNaN(sec) || sec < 0) return '';
+    sec = Math.round(sec);
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600),
+        m = Math.floor(sec % 3600 / 60);
+    if (d) return d + '天' + h + '小时';
+    if (h) return h + '小时' + m + '分';
+    if (m) return m + '分';
+    return sec + '秒';
+  }
+
+  /** 停滞文案。阈值来自后端 stats.stall_threshold_sec，不自己定。 */
+  function stallText(idle) {
+    if (idle == null) return '无进展';
+    if (idle < 3600) return '已 ' + Math.round(idle / 60) + ' 分钟无进展';
+    return '已 ' + dur(idle) + '无进展';
+  }
+
+  /** 从 started_at 到 (finished_at 或现在) 的秒数 */
+  function elapsed(t) {
+    if (!t.started_at) return null;
+    var a = Date.parse(t.started_at);
+    var b = t.finished_at ? Date.parse(t.finished_at) : Date.now();
+    if (isNaN(a) || isNaN(b)) return null;
+    return (b - a) / 1000;
+  }
+
+  function progOf(t) {
+    var p = (t.fields || {}).progress;
+    if (!p || p.total == null) return null;
+    var pct = p.total > 0 ? Math.round(p.current / p.total * 100) : 0;
+    return { cur: p.current, total: p.total, pct: pct, msg: p.message || '' };
+  }
+
+  function relTime(iso) {
+    var ts = Date.parse(iso);
+    if (isNaN(ts)) return '';
+    return (Date.now() - ts) / 1000;
+  }
+
+  function hhmmss(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  /* ---------------------------------------------------------- 窗口尺寸 */
+
+  /** 挂件最小/最大宽度。下限保证卡片还能放下标题，上限是"再宽也没用"。 */
+  var W_MIN = 300, W_MAX = 760;
+
+  /**
+   * 宽度 → 字号系数。
+   *
+   * ★ 为什么用 sqrt 而不是等比：
+   *   等比的话 720px 宽时字号会到 28px —— 大窗口里满屏都是字，信息反而变少。
+   *   平方根让字号**慢于宽度增长**：320→1.00、520→1.24、720→1.44。
+   *   配合「宽到一定程度并排两列」，放大的收益才落在"看得更多"而不是"字更大"。
+   */
+  function scaleFor(w) {
+    var k = Math.pow(Math.max(1, w) / 320, 0.45);
+    return Math.max(0.85, Math.min(1.45, Math.round(k * 1000) / 1000));
+  }
+
+  /** 字号基准。面板里的「字号」以它为中点（13px ⇒ scale 1）。
+   *  放大缩小从此由**字号**驱动，宽度只管"要不要并排两列"。 */
+  var FS_BASE = 13;
+
+  /** 宽过这个值就并排两列 —— 「放大」的意义是看到更多 */
+  var W_WIDE = 470;
+
+  /* ---------------------------------------------------------- 片段 */
+
+  function cardHtml(t) {
+    var isStall = !!STALLED[t.id];
+    var isDone = !!TERM[t.column_id];
+    var cls = 'card' + (isStall ? ' stall' : '') + (isDone ? ' done' : '');
+    var h = '<div class="' + cls + '" data-task="' + esc(t.id) + '">';
+    h += '<div class="ctitle">' + esc(t.title) + '</div>';
+
+    var p = progOf(t);
+    if (p) {
+      h += '<div class="pwrap"><div class="pbar' + (isDone ? ' ok' : '') + '">'
+         + '<i style="width:' + Math.max(0, Math.min(100, p.pct)) + '%"></i></div>'
+         + '<div class="pmeta"><span class="pc">' + p.pct + '%</span>'
+         + '<span class="pnum">' + p.cur + '/' + p.total + '</span>'
+         + (p.msg ? '<span class="pmsg">' + esc(p.msg) + '</span>' : '')
+         + '</div></div>';
+    } else if (t.description && !isStall && t.description !== t.title) {
+      // ★ 说明和标题一样时不重复显示。
+      //   会话镜像建出来的任务就是这种情况（标题本身就是那条请求），
+      //   卡片上会原样重复两遍，看起来像渲染出错。
+      h += '<div class="cdesc">' + esc(t.description) + '</div>';
+    }
+
+    if (isStall) h += '<div class="stallmsg">⚠ ' + esc(stallText(t.idle_sec)) + '</div>';
+
+    // ---- 以下都是「加一个可选字段，卡片就多一条信息」 ----
+    // 每个字段的存在与否，直接决定用户能不能看见某类问题。
+    var f = t.fields || {};
+
+    // A1 失败/重试：没有它，「失败了」和「卡住了」长得一样
+    var fail = f.failed;
+    if (fail && fail.count) {
+      h += '<div class="failmsg">✗ 失败 ' + fail.count + ' 次'
+         + (fail.message ? ' · ' + esc(String(fail.message).slice(0, 40)) : '') + '</div>';
+    }
+
+    // A4 截止时间：没有它，只知道「跑了多久」，不知道「还剩多久」
+    if (f.due_at) {
+      var dl = (Date.parse(f.due_at) - Date.now()) / 1000;
+      h += '<div class="duemsg' + (dl < 0 ? ' over' : '') + '">⏰ '
+         + (dl < 0 ? '已超期 ' + dur(-dl) : '还剩 ' + dur(dl)) + '</div>';
+    }
+
+    h += '<div class="cmeta">';
+    if (t.priority) h += '<span class="prio">P' + t.priority + '</span>';
+    // A5 执行者：多 agent 并行时，一眼知道哪个是自己要管的
+    if (f.assignee) h += '<span class="who">@' + esc(f.assignee) + '</span>';
+    (t.tags || []).slice(0, 3).forEach(function (g) {
+      h += '<span class="tag">' + esc(g) + '</span>';
+    });
+    // A3 步骤：卡片上只给个计数，明细在详情里（避免卡片撑高）
+    if (f.steps && f.steps.length) {
+      var dn = f.steps.filter(function (s) { return s.state === 'done'; }).length;
+      h += '<span class="stepsc">▤ ' + dn + '/' + f.steps.length + ' 步</span>';
+    }
+    // A2 产物：完成类任务的价值就在产物上
+    if (f.artifacts && f.artifacts.length) {
+      h += '<span class="artsc">📎 ' + f.artifacts.length + '</span>';
+    }
+    var e = elapsed(t);
+    if (e != null) h += '<span class="spacer"></span><span class="el">' + dur(e) + '</span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  /* ---------------------------------------------------------- 折叠状态
+   *
+   * ★ 为什么必须存在模块里、而不是只靠 DOM 上的 class：
+   *   宿主每 2 秒轮询一次数据，数据一变就 draw() ⇒ renderWidget 整块换
+   *   innerHTML。折叠状态如果只活在 DOM 上，就被这次重绘抹掉了 ——
+   *   用户点一下，两秒内自己弹回来，看起来就是"箭头点了没反应"。
+   *   状态必须活在重绘之外，重绘时再把它重新铺上去。
+   *
+   * 语义：只记**用户显式点过的**列；没点过的列沿用默认（有任务就展开）。
+   *   用三态（未记录 / 展开 / 收起）而不是布尔，是因为"空列默认收起"这个
+   *   默认值也要能被用户翻过来。
+   */
+  var COLLAPSED = Object.create(null);
+
+  function isOpen(cid, n) {
+    if (cid && Object.prototype.hasOwnProperty.call(COLLAPSED, cid)) {
+      return COLLAPSED[cid];
+    }
+    return n > 0;
+  }
+
+  function groupHtml(col, tasks, cls) {
+    var open = isOpen(col.id, tasks.length);
+    // 列内停滞数：这是 theme-c 原来那个「卡住了」置顶分区的**替代**。
+    // 原来是把停滞任务从列里搬走、再合成一个分区 —— 代价是列会被搬空、
+    // 连列名都跟着消失（用户报的「进行中的任务显示成卡住」就是这么来的）。
+    // 改成"列名不动、只加一个警示角标"：信息一样在，但不破坏列的语义。
+    var nStall = tasks.filter(function (t) { return STALLED[t.id]; }).length;
+    var h = '<div class="grp' + (cls || '') + '">';
+    h += '<div class="ghead" data-toggle="1" data-col="' + esc(col.id) + '">'
+       + '<span class="chev">'
+       + (open ? '▼' : '▶') + '</span>'
+       + '<span class="cbar" style="background:var(--col-' + esc(col.color || 'gray') + ')"></span>'
+       + '<span class="gtitle"' + (open ? '' : ' style="color:var(--fg-3)"') + '>'
+       + esc(col.title) + '</span>';
+    if (nStall) h += '<span class="gstall" title="该列有卡住的任务">⚠' + nStall + '</span>';
+    h += '<span class="gcount">' + tasks.length + '</span>';
+    if (col.wip_limit && col.id === 'doing') {
+      h += '<span class="gwip">WIP ' + tasks.length + '/' + col.wip_limit + '</span>';
+    }
+    h += '</div><div class="cards' + (open ? '' : ' hidden') + '">'
+       + tasks.map(cardHtml).join('') + '</div></div>';
+    return h;
+  }
+
+  function topbarHtml(stats) {
+    var stalled = stats.stalled || 0;
+    var h = '<div class="bar"><span class="dot"></span>'
+          + '<span class="ttl">' + esc(BOARD.title || 'Board') + '</span>';
+    if (stalled) h += '<span class="pill alert">' + stalled + ' 个卡住</span>';
+    else h += '<span class="pill ok">全部正常</span>';
+    // ★ 按钮重规划（Windows 惯例）：
+    //   右上角只放**窗口控制** —— `—` 收起为迷你条、`✕` 关闭（隐藏到托盘）。
+    //   原先这里是「↗ — ⤓」：↗ 是应用动作却混在窗口控制里，
+    //   而 ⤓ 与 ✕ 语义重复、✕ 又摆在右下角（Windows 用户找关闭一律去右上角）。
+    //   「↗ 浏览器打开」已经挪到右下角，和 ⚙ 放在一起。
+    //
+    // ★ 每个按钮都带 data-act 标注**角色**，宿主按角色绑定，绝不按位置索引。
+    //   踩过的坑：宿主原来写 `btns[0].onclick = open_board()`，假设顶栏是
+    //   「↗ —」。但详情页的顶栏是「← ✕」⇒ btns[0] 正好是**返回键**，
+    //   于是"点返回打开了浏览器"。内容层换一个视图，宿主就绑错一个按钮，
+    //   而且**不报错**——只是行为离谱。角色标注让这种错绑不可能发生。
+    h += '<span class="icobtn winbtn" data-act="mini" title="收起为迷你条">—</span>'
+       + '<span class="icobtn winbtn winbtn-close" data-act="close" '
+       + 'title="关闭（隐藏到托盘；托盘右键可退出）">✕</span></div>';
+    return h;
+  }
+
+  function srcbarHtml() {
+    // 三种来源要分得清：实时看板 / 演示数据 / 内置样例。
+    // 原先只判断了 live，导致演示数据被标成「看板服务未启动」—— 会让人
+    // 误判服务挂了，这类"标注错"比不标更坏（它会让你去查一个不存在的问题）。
+    var src = D._source;
+    var tag = src === 'live' ? '<span class="live">● 实时看板</span>'
+            : src === 'demo' ? '<span class="demo">● 演示数据</span>（代码开发场景，非真实任务）'
+            : '<span class="sample">● 样例数据</span>（看板服务未启动）';
+    // ★ 这里曾经是 `D._fetched_at.slice(11, 19) + ' UTC'` —— 直接切 ISO 字符串。
+    //   ISO 串（toISOString()）的时间部分是 **UTC**，所以标题栏比本地时间少 8 小时，
+    //   用户看到的就是"时间是错的"。而且它绕过了下面已有的 hhmmss()，
+    //   同一份代码里两种时间口径并存，很难一眼看出来。
+    //   一律走 hhmmss()：它用 getHours()/getMinutes()/getSeconds()，即**本地时间**。
+    return '<div class="srcbar">数据源：' + tag
+         + '<span class="spacer"></span>'
+         + '<span>' + esc(hhmmss(D._fetched_at)) + '</span>'
+         + '</div>';
+  }
+
+  /* ---------------------------------------------------------- 四个状态 */
+
+  function viewExpanded(theme) {
+    var stats = BOARD.stats || {};
+    var h = '<div class="widget">' + topbarHtml(stats) + srcbarHtml()
+          + '<div class="rate"><i style="width:' + (stats.percent || 0) + '%"></i></div>';
+
+    if (!ALL.length) return '<div class="widget">' + topbarHtml(stats) + srcbarHtml()
+                             + viewEmptyInner() + '</div>';
+
+    // 列组先拼到 body，最后统一包进 .cols2 ——
+    // 窗口宽过 W_WIDE 时由 CSS 变成两栏（而不是把字放大）
+    var body = '';
+    COLS.forEach(function (c) {
+        var list = BYCOL[c.id] || [];
+      body += groupHtml(c, list);
+    });
+    return h + '<div class="cols2">' + body + '</div></div>';
+  }
+
+  function viewEmptyInner() {
+    return '<div class="empty"><div class="big">没有任务</div>'
+         + '看板确实是空的（不是读不到数据）</div>';
+  }
+
+  function viewUnreachable() {
+    // ★ 这一屏的文案曾经是「看板服务未启动 / 连不上 127.0.0.1:8791 /
+    //   启动看板服务」——那是"界面走 HTTP 找服务"的老架构留下的。
+    //   现在数据是**进程内直读本地 sqlite**：没有服务、没有端口，
+    //   让用户去启动一个不存在的东西，比不提示更坏（会把人引到错的方向）。
+    var h = '<div class="widget mini"><div class="bar">'
+          + '<span class="dot bad"></span>'
+          + '<span class="ttl">' + esc(BOARD.title || 'Board') + '</span>'
+          + '<span class="icobtn" data-act="mini" title="收起">—</span></div>'
+          + '<div class="err"><div class="e1">读不到看板数据</div>'
+          + '<div class="e2">挂件直接读本地数据库文件，当前读不出来。<br>'
+          + '数据仍在磁盘上，没有被删。</div>'
+          + '<button class="btn">重试读取</button></div></div>';
+    return h;
+  }
+
+  function viewMini() {
+    var stats = BOARD.stats || {};
+    var n = stats.total || 0, st = stats.stalled || 0;
+    var h = '<div class="widget mini">'
+          + '<div class="rate"><i style="width:' + (stats.percent || 0) + '%"></i></div>'
+          + '<div class="minibar"><span class="dot' + (st ? ' bad' : '') + '"></span>'
+          + '<span class="txt"><span class="num">' + n + '</span> 个任务';
+    if (st) h += ' · <span class="alert">' + st + ' 个卡住</span>';
+    h += '</span><span class="icobtn" data-act="expand" title="展开">▴</span></div></div>';
+    return h;
+  }
+
+  function viewDetail(taskId) {
+    var t = taskById(taskId) || ALL[0];
+    if (!t) return viewEmpty();
+    var p = progOf(t), e = elapsed(t);
+    var h = '<div class="widget"><div class="bar">'
+          + '<span class="icobtn" data-act="back" data-back="1" title="返回">←</span>'
+          + '<span class="ttl">任务详情</span>'
+          + '<span class="icobtn" data-act="back" data-back="1" title="返回">×</span>'
+          + '</div><div class="dbody">'
+          + '<div class="dtitle" style="margin-bottom:9px">' + esc(t.title) + '</div>'
+          + '<div class="kv">';
+    var col = null;
+    COLS.forEach(function (c) { if (c.id === t.column_id) col = c; });
+    h += '<div class="k">所在列</div><div class="v">' + esc(col ? col.title : t.column_id) + '</div>';
+    if (p) {
+      h += '<div class="k">进度</div><div class="v">'
+         + '<div class="pbar"><i style="width:' + p.pct + '%"></i></div>'
+         + '<div class="pmeta"><span class="pc">' + p.pct + '%</span>'
+         + '<span class="pnum">' + p.cur + '/' + p.total + '</span></div>';
+      if (p.msg) h += '<div style="font-size:11px;color:var(--fg-3);margin-top:3px">' + esc(p.msg) + '</div>';
+      h += '</div>';
+    }
+    // 说明与标题相同时不重复（会话镜像建的任务就是这种）—— 见卡片渲染处的说明
+    if (t.description && t.description !== t.title) {
+      h += '<div class="k">说明</div><div class="v">' + esc(t.description) + '</div>';
+    }
+    if ((t.tags || []).length) {
+      h += '<div class="k">标签</div><div class="v">'
+         + t.tags.map(function (g) { return '<span class="tag">' + esc(g) + '</span>'; }).join(' ')
+         + '</div>';
+    }
+    if (t.priority) h += '<div class="k">优先级</div><div class="v"><span class="prio">P' + t.priority + '</span></div>';
+    // 加字段带来的信息，在详情里给完整的
+    if ((t.fields || {}).assignee) {
+      h += '<div class="k">执行者</div><div class="v"><span class="who">@'
+         + esc(t.fields.assignee) + '</span></div>';
+    }
+    if ((t.fields || {}).due_at) {
+      var dl2 = (Date.parse(t.fields.due_at) - Date.now()) / 1000;
+      h += '<div class="k">截止</div><div class="v" style="color:'
+         + (dl2 < 0 ? 'var(--bad)' : 'var(--fg)') + '">'
+         + hhmmss(t.fields.due_at) + '（' + (dl2 < 0 ? '已超期 ' + dur(-dl2) : '还剩 ' + dur(dl2)) + '）</div>';
+    }
+    if ((t.fields || {}).failed) {
+      h += '<div class="k">失败</div><div class="v" style="color:var(--bad)">'
+         + t.fields.failed.count + ' 次'
+         + (t.fields.failed.message ? ' · ' + esc(t.fields.failed.message) : '') + '</div>';
+    }
+    if (STALLED[t.id]) h += '<div class="k">状态</div><div class="v" style="color:var(--warn)">'
+                          + esc(stallText(t.idle_sec)) + '</div>';
+    if (t.created_at) {
+      var r = relTime(t.created_at);
+      h += '<div class="k">创建于</div><div class="v">'
+         + hhmmss(t.created_at) + (r > 0 ? '（' + dur(r) + '前）' : '') + '</div>';
+    }
+    if (e != null) h += '<div class="k">耗时</div><div class="v">' + dur(e) + '</div>';
+    h += '</div>';
+
+    // 子步骤清单 —— 比「树」轻得多，但回答的是同一个问题：走到哪一步了。
+    // 进度条说「完成多少」，步骤说「走到哪了」，两者不等价：
+    // "3/7 步"往往比"43%"更能说明问题。这里只用扁平列表，不做缩进/递归。
+    var steps = (t.fields || {}).steps;
+    if (steps && steps.length) {
+      var done = steps.filter(function (s) { return s.state === 'done'; }).length;
+      h += '<div class="sect"><div class="h">步骤 · ' + done + '/' + steps.length + '</div>';
+      steps.forEach(function (s) {
+        var m = s.state === 'done' ? '✓' : (s.state === 'running' ? '▶' : '○');
+        h += '<div class="step ' + esc(s.state || 'pending') + '">'
+           + '<span class="sm">' + m + '</span><span>' + esc(s.name) + '</span></div>';
+      });
+      h += '</div>';
+    }
+
+    // A2 产物：完成类任务的价值就在产物上。现在只看到"完成"，
+    // 看不到"产出了什么" —— 而这才是这类任务真正值得记的东西。
+    var arts = (t.fields || {}).artifacts;
+    if (arts && arts.length) {
+      h += '<div class="sect"><div class="h">产出 · ' + arts.length + '</div>';
+      arts.forEach(function (a) {
+        h += '<div class="art"><span class="ai">📎</span>'
+           + '<span class="an">' + esc(a.name || a) + '</span>'
+           + (a.note ? '<span class="ad">' + esc(a.note) + '</span>' : '')
+           + '</div>';
+      });
+      h += '</div>';
+    }
+
+    var evs = EVENTS[t.id] || [];
+    if (evs.length) {
+      h += '<div class="sect"><div class="h">变更流水 · ' + evs.length + ' 条</div>';
+      evs.forEach(function (ev) {
+        var detail = '';
+        if (ev.kind === 'move') detail = (ev.from_col || '?') + ' → ' + (ev.to_col || '?');
+        else if (ev.kind === 'advance') {
+          var v = (ev.detail || {}).value || {};
+          detail = '→ ' + (v.current != null ? v.current : '') + (v.total != null ? '/' + v.total : '');
+        } else if (ev.kind === 'create') detail = '进入 ' + (ev.to_col || '');
+        else if (ev.kind === 'update') detail = JSON.stringify((ev.detail || {}).fields || ev.detail || {});
+        else if (ev.kind === 'delete') detail = '删除';
+        h += '<div class="ev"><span class="t">' + hhmmss(ev.created_at) + '</span>'
+           + '<span class="k2">' + esc(ev.kind) + '</span>'
+           + '<span class="d">' + esc(detail) + '</span></div>';
+      });
+      h += '</div>';
+    }
+    return h + '</div></div>';
+  }
+
+  function viewEmpty() {
+    return '<div class="widget mini">' + topbarHtml(BOARD.stats || {})
+         + viewEmptyInner() + '</div>';
+  }
+
+  /* ---------------------------------------------------------- 对外 */
+
+  window.renderWidget = function (el, state, opts) {
+    opts = opts || {};
+    var theme = opts.theme || 'theme-amber';
+    // 尺寸与透明度：由调用方（工作台 / 桌面窗口）传入
+    var w = Math.max(W_MIN, Math.min(W_MAX, Math.round(opts.width || 320)));
+    var alpha = opts.alpha == null ? 1 : Math.max(0.25, Math.min(1, opts.alpha));
+    // ★ 放大缩小改由**字号**驱动（原来是调宽度推出来的）。
+    //   宽度还有用（决定要不要并排两列），但它不该同时兼任"字号"这一个旋钮。
+    var sc = (opts.font ? Math.max(0.75, Math.min(1.5, opts.font / FS_BASE)) : scaleFor(w));
+
+    var html;
+    switch (state) {
+      case 'detail':      html = viewDetail(opts.taskId); break;
+      case 'mini':        html = viewMini(); break;
+      case 'unreachable': html = viewUnreachable(); break;
+      case 'empty':       html = viewEmpty(); break;
+      default:            html = viewExpanded(theme);
+    }
+    el.innerHTML = html;
+    el.className = theme;
+
+    // 窗口属性写在挂件根元素上，CSS 通过 var(--w/--scale/--bg-alpha/--win-alpha) 消费
+    var widget = el.querySelector('.widget');
+    if (widget) {
+      // 「前妻整容前」是唯一带背景图的主题：把两层背景塞进挂件内部。
+      // ★ 必须是 .widget 的**子元素** —— --bgw 是百分比，按包含块解析，
+      //   挂到挂件外面会让图按外面的宽度算，结果偏小偏位（踩过）。
+      if (theme === 'theme-ex' && !widget.querySelector('.ex-bg')) {
+        var bgLayer = document.createElement('div');
+        bgLayer.className = 'ex-bg';
+        bgLayer.innerHTML = '<i></i><b></b>';
+        widget.insertBefore(bgLayer, widget.firstChild);
+      }
+      widget.style.setProperty('--w', w + 'px');
+      widget.style.setProperty('--scale', String(sc));
+      widget.style.setProperty('--bg-alpha', String(alpha));
+      // ★ 「透明度」作用于**整个前端**（连文字一起透）——
+      //   只调背景色 alpha 的话几乎看不出来，用户报过"调了基本无效"。
+      document.documentElement.style.setProperty('--win-alpha', String(alpha));
+      widget.classList.toggle('wide', w >= W_WIDE);
+      // 高度上限跟着放大，否则"变大"只在横向生效
+      widget.style.setProperty('--maxh', Math.round(460 * sc) + 'px');
+    }
+
+    // 组头折叠 / 卡片进详情 / 返回，在原型里就地生效
+    el.querySelectorAll('[data-toggle]').forEach(function (g) {
+      g.onclick = function () {
+        var c = g.nextElementSibling, ch = g.querySelector('.chev');
+        if (!c) return;
+        c.classList.toggle('hidden');
+        var nowHidden = c.classList.contains('hidden');
+        if (ch) ch.textContent = nowHidden ? '▶' : '▼';
+        // ★ 记下来。宿主每 2 秒可能重绘一次，不记就白点。
+        var cid = g.getAttribute('data-col');
+        if (cid) COLLAPSED[cid] = !nowHidden;
+      };
+    });
+    el.querySelectorAll('.card').forEach(function (c) {
+      c.onclick = function () {
+        if (opts.onOpenTask) opts.onOpenTask(c.getAttribute('data-task'));
+      };
+    });
+    // ★ 返回键必须真的能返回。
+    //   `data-back` 是详情页那两个「← / ×」上的标记，但**此前没有任何地方
+    //   处理它** —— 也就是说详情页压根没有返回通路，只靠内容层画了个箭头。
+    //   更糟的是宿主按位置绑按钮，把「←」绑成了"打开浏览器"（见 host.html）。
+    //   现在由宿主传 onBack 进来（"回列表"是宿主的状态，内容层不该自己改）。
+    el.querySelectorAll('[data-back]').forEach(function (b) {
+      b.onclick = function (e) {
+        if (e && e.stopPropagation) e.stopPropagation();
+        if (opts.onBack) opts.onBack();
+      };
+    });
+    return el;
+  };
+
+  // 供工作台/宿主读取，避免把阈值硬编码在多个地方
+  window.WB_WIDGET_META = {
+    W_MIN: W_MIN, W_MAX: W_MAX, W_WIDE: W_WIDE,
+    scaleFor: scaleFor
+  };
+
+  /** 宿主换数据用：WB_RELOAD(bundle) 之后再调 renderWidget 即可。
+   *  数据没换而只重渲染是浪费 —— 所以这里只换数据，不主动重绘。 */
+  window.WB_RELOAD = function (data) { loadData(data); };
+
+  window.WB_META = {
+    source: D._source || 'unknown',
+    total: (BOARD.stats || {}).total || 0,
+    stalled: (BOARD.stats || {}).stalled || 0,
+    fetchedAt: D._fetched_at || null
+  };
+})();
+
+</script>
+<!--
+  ↑ 这行是**构建期的内联锚点**，别删。
+    make_inline.py 会把它替换成 widget.js 的内联脚本块，生成打包用的
+    host.inline.html（零外部请求）。直接打开本文件（开发态）时它只是注释，
+    什么都不做，widget.js 由下面的动态加载兜住 —— 两种模式都能跑。
+
+    ★ 为什么要有这个锚点、而不是去改下面那段动态加载：
+      动态加载是"宿主先拿到数据、widget.js 才有东西可渲染"的顺序保障，
+      反复调过很多轮才稳定。内联只需**在旁边插一个入口**，不该去动它。
+
+    ★ 注释里不要写出成对的脚本标签字面量（哪怕在 HTML 注释里也不行）：
+      任何按"脚本标签对"做粗匹配的工具都会把注释内容当成代码抓出来，
+      于是"注释里的示例"变成"真实数据"，引发一堆假报错。
+-->
+<script>
+/* ============================================================
+   宿主桥接
+   ============================================================ */
+try { console.log('[host] script start'); } catch (e) {}
+
+/* ★ 全局错误必须显示到界面上。
+ *
+ * 打包版是 windowed（**没有控制台**），console.error 出去的东西
+ * 用户一个字也看不到 —— 于是任何 JS 异常都表现为「窗口空白」或
+ * 「卡在某句话上」，而且完全无从定位。
+ * 这三次实机问题里有两次都是栽在这里：现象有了、原因看不见。
+ */
+function showFatal(title, detail) {
+  try {
+    var _a = api();
+    if (_a && _a.log) _a.log('FATAL: ' + title + ' | ' + String(detail).split(String.fromCharCode(10)).join(' / '));
+  } catch (e) {}
+  try {
+    var el = document.getElementById('app');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="widget mini"><div class="err">'
+      + '<div class="e1">' + String(title).slice(0, 120) + '</div>'
+      + '<div class="e2" style="text-align:left;word-break:break-all">'
+      + String(detail || '').slice(0, 400) + '</div></div></div>';
+    var f = document.getElementById('fstat');
+    if (f) { f.textContent = '出错：' + String(title).slice(0, 60); f.style.color = 'var(--bad)'; }
+    var b = document.getElementById('boot');
+    if (b) b.remove();          // 出错时一定要把遮罩摘掉，否则用户看到的是"一直连接中"
+  } catch (e) { /* 兜底里再出错就没办法了 */ }
+}
+window.onerror = function (msg, src, line, col) {
+  showFatal('脚本错误', msg + '\n' + (src || '').split('/').pop() + ':' + line + ':' + col);
+  return false;
+};
+window.addEventListener('unhandledrejection', function (e) {
+  var r = e.reason;
+  showFatal('异步操作失败', (r && (r.message || r.toString())) || String(r));
+});
+
+var API = null;
+var CFG = { width: 320, height: 470, alpha: 1, theme: 'theme-amber',
+            font: 13, on_top: true };   // font = 字号(px)，取代原来的宽度旋钮
+var CUR_STATE = 'expanded';   // 当前视图（展开/详情/收起/连不上）
+var CUR_TASK = null;          // 详情视图看的是哪个任务
+var TIMER = null;
+var FAILS = 0;
+var SIGN = '';            // 署名（底栏右端）
+var NO_SOURCE = false;    // 没找到现成数据源（首次运行）
+var BOARD_URL = 'http://127.0.0.1:8791';   // 由 get_config() 填
+var ETAG = null;                            // 上次响应的 ETag（条件请求用）
+var SHOW_MCP_GUIDE = false;   // 首次启动且 MCP 未注册 ⇒ 摆出注册引导
+var MCP_GUIDE_DONE = false;   // 刚注册完，换成"还差两步"的提示
+var BOOT_TRACE = [];          // 启动到哪一步了 —— 卡住时这个最有价值
+
+/** 读不到数据时用的一张空看板：结构与正常一致，只是没有任务。 */
+function emptyBoard() {
+  var cols = [
+    { id: 'todo',    title: '待办',   color: 'gray',  is_terminal: 0, wip_limit: null },
+    { id: 'doing',   title: '进行中', color: 'blue',  is_terminal: 0, wip_limit: 5 },
+    { id: 'blocked', title: '阻塞',   color: 'red',   is_terminal: 0, wip_limit: null },
+    { id: 'done',    title: '已完成', color: 'green', is_terminal: 1, wip_limit: null }
+  ];
+  return {
+    title: '任务看板', columns: cols,
+    tasks_by_column: { todo: [], doing: [], blocked: [], done: [] },
+    stats: { total: 0, finished: 0, active: 0, percent: 0, agg_progress: 0,
+             stalled: 0, stall_threshold_sec: 90,
+             per_column: { todo: 0, doing: 0, blocked: 0, done: 0 } },
+    stalled_ids: [], server_seq: 0
+  };
+}
+
+function trace(step) {
+  BOOT_TRACE.push(step);
+  var f = document.getElementById('fstat');
+  if (f && !f.textContent.startsWith('共 ')) f.textContent = '启动中… ' + step;
+  // ★ 上报到宿主的日志文件：打包版没有控制台，页面里的进度只有落盘才看得见
+  try { var a = api(); if (a && a.log) a.log('trace:' + step); } catch (e) {}
+}
+
+function api() { return window.pywebview && window.pywebview.api; }
+
+/** 把 bundle 交给 widget.js 并重绘 */
+function applyBundle(r) {
+  window.WB_RELOAD({
+    _source: 'live',
+    _fetched_at: new Date().toISOString(),
+    board: r.board,
+    events: r.events
+  });
+  draw();
+}
+
+var CUR_STATE = 'expanded';
+var LAST_DRAWN = null;      // 上一帧画的是哪个视图（决定要不要沿用滚动位置）
+
+function draw() {
+  var app = document.getElementById('app');
+  // ★ 保住滚动位置 —— renderWidget 是整块换 innerHTML。
+  //   轮询每 2 秒就会走到这里一次（数据一变就重绘），
+  //   不还原的话用户往下翻「已完成」，每 2 秒被弹回顶端。
+  //   但**只在同一视图内**沿用：从列表进详情、从详情回列表，
+  //   沿用旧的滚动位置会让新页面莫名其妙停在半截。
+  var keepTop = (app && CUR_STATE === LAST_DRAWN) ? app.scrollTop : 0;
+  window.renderWidget(app, CUR_STATE, {
+    theme: CFG.theme, width: CFG.width, alpha: CFG.alpha, font: CFG.font,
+    taskId: CUR_TASK,
+    onOpenTask: function (tid) { CUR_TASK = tid; CUR_STATE = 'detail'; draw(); fitWindow(); },
+    // 「返回」是宿主的视图状态，所以由宿主提供实现；内容层只负责画那个箭头
+    onBack: function () { CUR_TASK = null; CUR_STATE = 'expanded'; draw(); fitWindow(); }
+  });
+  LAST_DRAWN = CUR_STATE;
+  if (app) app.scrollTop = keepTop;
+  // ★ 主题类**同时**挂到 <html> 上。
+  //   widget.js 只把类挂在 #app 上，而底栏 #foot、设置面板 #panel、缩放柄 #grip
+  //   都是 #app 的**兄弟节点** —— 它们拿不到主题变量，于是"底部不跟着换主题"。
+  //   挂到 <html> 之后所有节点都在同一个作用域里。
+  ['theme-midnight', 'theme-amber', 'theme-ink', 'theme-ex']
+    .forEach(function (t) {
+      document.documentElement.classList.toggle(t, t === CFG.theme);
+    });
+  renderMcpGuide(app);
+  markDragArea();
+  bindDrag();
+  setSign();
+  document.documentElement.style.setProperty('--bg-alpha', CFG.alpha);
+}
+
+/* ---------------------------------------------------------- MCP 注册引导
+ *
+ * ★ 为什么要在**首次启动**就摆出来：
+ *   MCP 没接上时，agent 一个任务也记不进来 —— 但界面上**完全看不出来**，
+ *   "空看板"和"没接上"长得一模一样。用户只会觉得"这挂件没用"。
+ *   所以不能等他自己去设置里翻，得在第一次打开时就说清楚。
+ *
+ * ★ 只在列表页出现，且插在数据源条之后（不挡顶栏、不挡第一张卡）。
+ * ★ 按钮一律按 data-act 角色绑，不按位置索引 —— 位置索引在视图切换后会错位
+ *   （踩过：点"返回"结果打开了浏览器）。
+ */
+function renderMcpGuide(app) {
+  if (!app) return;
+  var old = app.querySelector('.mcpguide');
+  if (old) old.remove();
+  if (!SHOW_MCP_GUIDE) return;
+  if (CUR_STATE !== 'expanded') return;      // 详情页/收起态不摆
+
+  var host = app.querySelector('.widget');
+  if (!host) return;
+  var src = host.querySelector('.srcbar');
+  var box = document.createElement('div');
+  box.className = 'mcpguide' + (MCP_GUIDE_DONE ? ' done' : '');
+  if (MCP_GUIDE_DONE) {
+    // 注册完之后，同一个位置换成"接下来还要做两步"的提示
+    box.innerHTML =
+      '<div class="mg-h">✓ 已写入配置，还差两步</div>'
+      + '<div class="mg-b">① 重启 WorkBuddy　② 连接器管理 → 右上角「自定义连接器」'
+      + ' → 找到 <b>board</b> → 点「信任」。做完在新会话里让我调一次 list_tasks 验证。</div>'
+      + '<div class="mg-a"><button class="mg-go" data-act="mcp-dismiss">知道了</button></div>';
+  } else {
+    box.innerHTML =
+      '<div class="mg-h">还没接上 WorkBuddy</div>'
+      + '<div class="mg-b">接上之后 agent 才能把干的活记进这块看板。'
+      + '现在只能看，<b>记不进来</b>。</div>'
+      + '<div class="mg-a">'
+      + '<button class="mg-go" data-act="mcp-install">立即接上</button>'
+      + '<button class="mg-later" data-act="mcp-dismiss">以后再说</button></div>';
+  }
+  if (src && src.nextSibling) host.insertBefore(box, src.nextSibling);
+  else host.appendChild(box);
+
+  // 按角色绑事件（不是按位置）
+  var inst = box.querySelector('[data-act="mcp-install"]');
+  var dism = box.querySelector('[data-act="mcp-dismiss"]');
+  if (inst) {
+    inst.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (!a || !a.install_mcp) return;
+      inst.disabled = true;
+      inst.textContent = '注册中…';
+      a.install_mcp().then(function (r) {
+        if (r && r.ok) {
+          MCP_GUIDE_DONE = true;
+          SHOW_MCP_GUIDE = true;          // 换成"还差两步"的提示，别立刻消失
+          draw(); fitWindow();
+        } else {
+          inst.disabled = false;
+          inst.textContent = '重试';
+          var b = box.querySelector('.mg-b');
+          if (b) b.textContent = '注册失败：' + ((r && r.error) || '未知错误');
+        }
+      }).catch(function (err) {
+        inst.disabled = false;
+        inst.textContent = '重试';
+      });
+    };
+  }
+  if (dism) {
+    dism.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (a && a.dismiss_mcp_guide) a.dismiss_mcp_guide();
+      SHOW_MCP_GUIDE = false;
+      draw(); fitWindow();
+    };
+  }
+}
+
+/** 顶栏拖动。
+ *
+ * ★ 不用 pywebview 的 easy_drag / draggable：
+ *   前者整窗可拖、会吃掉卡片点击；后者的参数其实是 bool，
+ *   不是"选择器"（我一开始理解错了）。所以自己实现，
+ *   由 JS 采集位移、通过 IPC 下发，最可控。
+ *
+ * 用 rAF 合并位移：mousemove 触发频率很高，
+ * 每次都发 IPC 会卡；攒到下一帧发一次就够顺。
+ */
+var DRAG = { on: false, lx: 0, ly: 0, dx: 0, dy: 0, raf: 0 };
+
+/** 往顶栏补一个「最小化到托盘」按钮。
+ *
+ * widget.js 的顶栏固定只画 ↗ 和 —（它是内容层，不该知道"隐藏窗口"这种宿主能力）。
+ * 所以宿主在这里注入第三个按钮，并沿用同样的 class 保持样式一致。
+ */
+function ensureMinButton(bar) {
+  if (bar.querySelector('.icobtn-min')) return;
+  var btn = document.createElement('button');
+  btn.className = 'icobtn icobtn-min';
+  // ★ 角色标注：宿主自己也要遵守"按角色绑定"的约定，
+  //   否则将来有人再写 btns[N] 又会把它算错位置。
+  btn.setAttribute('data-act', 'tray');
+  btn.title = '最小化到托盘（右键托盘图标可重新显示）';
+  btn.textContent = '⤓';
+  btn.onclick = function (e) {
+    e.stopPropagation();
+    var a = api();
+    if (a && a.hide_to_tray) a.hide_to_tray();
+  };
+  // 插到最后一个按钮之后
+  var last = bar.querySelectorAll('.icobtn');
+  var anchor = last[last.length - 1];
+  if (anchor && anchor.nextSibling) bar.insertBefore(btn, anchor.nextSibling);
+  else bar.appendChild(btn);
+  // 新注入的按钮不能被当成拖动区（bar 本身是 drag-area，会冒泡上来）
+  btn.classList.remove('drag-area');
+}
+
+function flushDrag() {
+  DRAG.raf = 0;
+  if (!DRAG.dx && !DRAG.dy) return;
+  var a = api();
+  if (a && a.move_window) a.move_window(DRAG.dx, DRAG.dy);
+  DRAG.dx = 0; DRAG.dy = 0;
+}
+
+function bindDrag() {
+  var app = document.getElementById('app');
+  var bar = app.querySelector('.widget .bar');
+  if (!bar || bar.__dragBound) return;
+  bar.__dragBound = true;
+
+  bar.addEventListener('mousedown', function (e) {
+    // 按钮自己处理点击，不参与拖动
+    if (e.target.closest && e.target.closest('button, .icobtn, a')) return;
+    DRAG.on = true; DRAG.lx = e.screenX; DRAG.ly = e.screenY;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!DRAG.on) return;
+    DRAG.dx += e.screenX - DRAG.lx;
+    DRAG.dy += e.screenY - DRAG.ly;
+    DRAG.lx = e.screenX; DRAG.ly = e.screenY;
+    if (!DRAG.raf) DRAG.raf = requestAnimationFrame(flushDrag);
+  });
+  document.addEventListener('mouseup', function () {
+    DRAG.on = false;
+    if (DRAG.raf) { cancelAnimationFrame(DRAG.raf); DRAG.raf = 0; }
+    if (DRAG.dx || DRAG.dy) flushDrag();
+    // 拖动结束后记住位置
+    var a = api();
+    if (a && a.save_state) a.save_state({});
+  });
+}
+
+/** 渲染后：标拖拽区 + 按角色把顶栏按钮接上宿主能力。
+ *
+ * ★★ 两条硬规矩，都是被真事故逼出来的：
+ *
+ * ① **按角色绑定，绝不按位置索引。**
+ *    原来写的是 `btns[0].onclick = open_board()`，注释还写着"顶栏按钮共 3 个：
+ *    ↗ 打开看板 · — 收起 · ⤓ 最小化"。这个假设只在列表页成立：
+ *    详情页的顶栏是「← × ⤓」—— btns[0] 正好是**返回键**，
+ *    于是「点返回打开了浏览器」。内容层换个视图，宿主就错绑一个按钮，
+ *    而且**全程不报错**。现在 widget.js 给每个按钮标 data-act，宿主只认角色。
+ *
+ * ② **绑定范围是整个挂件，不是某个容器。**
+ *    之前只在 `.widget .bar` 里找按钮，而**收起态用的是 `.minibar`**（不是 .bar）
+ *    ⇒ 收起态的「▴ 展开」从来没被绑过。用户点「—」收起之后，
+ *    那个 ▴ 是个死按钮 —— **人就被困在 62px 的条形里出不来了**。
+ *    所以这里改成从 #app 里按 data-act 找，与视图用哪个容器无关。
+ */
+function markDragArea() {
+  var app = document.getElementById('app');
+
+  // ---------------------------------------------------------- 按钮（跨视图）
+  var act = function (name) { return app.querySelector('[data-act="' + name + '"]'); };
+
+  var bBoard = act('board');
+  if (bBoard) bBoard.onclick = function (e) { e.stopPropagation(); api().open_board(); };
+
+  var bMini = act('mini');
+  if (bMini) bMini.onclick = function (e) {
+    e.stopPropagation();
+    CUR_STATE = CUR_STATE === 'mini' ? 'expanded' : 'mini';
+    draw(); fitWindow();
+  };
+
+  var bExpand = act('expand');
+  if (bExpand) bExpand.onclick = function (e) {
+    e.stopPropagation();
+    CUR_STATE = 'expanded';
+    draw(); fitWindow();
+  };
+
+  // 右上角的 ✕ = **窗口关闭键**（Windows 惯例）。
+  // ★ 关的是"窗口"不是"进程"：真正 quit() 会 window.destroy()，
+  //   窗口一没就再没有恢复入口（除非托盘还在）。所以这里是隐藏到托盘，
+  //   托盘右键有「退出」。语义和位置都跟 Windows 一致，但不会把人困住。
+  var bClose = act('close');
+  if (bClose) bClose.onclick = function (e) {
+    e.stopPropagation();
+    api().hide_to_tray();
+  };
+
+  // data-back（详情页的 ← / ×）由 widget.js 通过 opts.onBack 处理，
+  // 宿主只要保证它不被当成拖动区（见下面 classList.remove）。
+
+  // ---------------------------------------------------------- 拖动区
+  var bar = app.querySelector('.widget .bar');
+  if (bar) {
+    // 只标标题与状态点 —— 按钮留在外面，否则点按钮会变成拖窗口
+    ['ttl', 'dot'].forEach(function (c) {
+      var el = bar.querySelector('.' + c);
+      if (el) el.classList.add('drag-area');
+    });
+    // 顶栏本身也允许拖（但按钮在 DOM 里是后置的，点击时事件目标仍是按钮）
+    bar.classList.add('drag-area');
+    bar.querySelectorAll('button, .icobtn').forEach(function (b) {
+      b.classList.remove('drag-area');
+    });
+    // ★ 不再注入「最小化到托盘」按钮：右上角已经有 ✕（Windows 惯例的关闭键），
+    //   两个按钮做同一件事，用户会以为是两个不同的东西。
+
+  }
+
+  // ★「重试读取」按钮必须在这里绑。
+  //   它是 widget.js（内容层）渲染出来的，宿主不绑就没有任何动作 ——
+  //   表现成"点了没反应"，而且不报错。
+  //
+  //   ★ 这里以前调的是 `api().start_board()`（去拉起一个 HTTP 看板服务），
+  //     那是老架构。现在数据是**进程内直读 sqlite**：没有服务可启动，
+  //     "重试"就是**重新取一次数据**。调 start_board 只会去做一件没用的事。
+  var errBtn = app.querySelector('.err .btn');
+  if (errBtn) {
+    errBtn.onclick = function (e) {
+      e.stopPropagation();
+      errBtn.disabled = true;
+      errBtn.textContent = '正在重试…';
+      FAILS = 0;
+      schedule(60);                     // 立刻重新取一次数据
+      setTimeout(function () {
+        errBtn.disabled = false;
+        errBtn.textContent = '重试读取';
+      }, 1200);
+    };
+  }
+}
+
+/** 窗口高度跟着内容走（收起态要变矮） */
+/** 窗口高度跟着内容走（收起态要变矮）。
+ *
+ * ★★ 这里曾经把「收起」彻底挡死：
+ *      if (CUR_STATE === 'mini') h = 62;
+ *      if (h > 80 && ...) { resize(...) }      // 62 > 80 永远为 false
+ *    结果切到收起态时**窗口尺寸一次都不改**，屏幕上留下一个 62px 的迷你条
+ *    加一大片空白 —— 用户报的"收起功能异常"就是这个。
+ *
+ *    那个 `h > 80` 的门槛本意是防"内容还没渲染出来时把窗口缩没"，
+ *    但它不该管到收起态（收起态的高度是**定值**，跟内容无关）。
+ *    所以改成：收起态直接给定值；只有"按内容算"的那条分支才做下限保护。
+ */
+var MINI_H = 62;          // 收起态窗口高度（定值，不跟内容走）
+
+/** 量出「界面真实需要多高」。
+ *
+ * ★ 为什么不能直接用 `#app.scrollHeight`：
+ *   `#app` 是 `flex:1`，高度被撑满整个可用区。内容比它矮时
+ *   `scrollHeight` 会**被钳到容器高度** ⇒ 量出来的永远是"当前窗口高度"
+ *   ⇒ `fitWindow` 只能把窗口**变大**、永远缩不回来。
+ *   表现就是：用户手动拉高过一次之后，窗口再也回不到贴合内容的高度，
+ *   下面永远留一大片空白（截图里那一大块）。
+ *
+ * 所以这里改成**直接量在文档流里的元素**：`#app` 里挂件本身，
+ * 加上 #app 之外的那几块（数据源条、底栏）。绝对定位的浮层（面板、缩放柄）不算。
+ */
+function contentHeight() {
+  function flowH(el) {
+    var cs = getComputedStyle(el);
+    if (cs.position === 'absolute' || cs.position === 'fixed' || cs.display === 'none') {
+      return 0;
+    }
+    return el.getBoundingClientRect().height
+         + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+  }
+
+  var total = 0, i, el;
+  var app = document.getElementById('app');
+  if (app) {
+    // ★ 量 #app 的**子元素**，不能量 #app 自己 ——
+    //   #app 是 flex:1，它自己的高度就是被拉伸后的容器高度，
+    //   量它等于什么都没改（第一版就是这么写的，被反向验证当场抓出来）。
+    for (i = 0; i < app.children.length; i++) {
+      total += flowH(app.children[i]);
+    }
+    var acs = getComputedStyle(app);
+    total += (parseFloat(acs.paddingTop) || 0) + (parseFloat(acs.paddingBottom) || 0)
+           + (parseFloat(acs.borderTopWidth) || 0) + (parseFloat(acs.borderBottomWidth) || 0);
+  }
+  for (i = 0; i < document.body.children.length; i++) {
+    el = document.body.children[i];
+    if (el.id === 'app' || el.id === 'panel' || el.id === 'grip' || el.id === 'boot') continue;
+    total += flowH(el);
+  }
+  return total;
+}
+
+function fitWindow() {
+  var h;
+  if (CUR_STATE === 'mini') {
+    h = MINI_H;
+  } else {
+    h = Math.min(contentHeight() + 8, 900);
+    // 内容还没渲染（量出来很小）时不要动窗口，
+    // 否则会把窗口缩成一条缝，而且再也长不回来
+    if (h < 80) return;
+  }
+  if (Math.abs(h - CFG.height) > 6) {
+    CFG.height = h;
+    if (api()) api().resize(CFG.width, h);
+  }
+}
+
+function setSign() {
+  var el = document.getElementById('fsign');
+  if (el) el.textContent = SIGN ? ('· ' + SIGN) : '';
+}
+
+function setStat(txt, warn) {
+  var el = document.getElementById('fstat');
+  el.textContent = txt;
+  // 用变量而不是写死：#6e7681 在浅色主题上几乎看不见
+  el.style.color = warn ? 'var(--warn)' : 'var(--fg-3)';
+}
+
+/* ---------------------------------------------------------- 轮询 */
+
+function schedule(ms) {
+  if (TIMER) clearTimeout(TIMER);
+  TIMER = setTimeout(tick, ms);
+}
+
+/** 取一次看板数据。
+ *
+ * ★ 走 IPC 直读数据库（进程内），不是 HTTP。
+ *   原先走 fetch 是因为我误判了病根（以为 IPC 会阻塞主线程）；
+ *   真正的问题是**同进程后台 HTTP 服务被 GIL 饿死**。
+ *   现在数据直接从本地 sqlite 读出来，毫秒级返回：
+ *   没有端口、没有子进程、没有"连接中/连不上"这种中间态。
+ */
+async function fetchBoard() {
+  var a = api();
+  if (!a || !a.get_board) return { ok: false, error: 'no bridge' };
+  var t0 = Date.now();
+  var r = await a.get_board();
+  try {
+    if (a.log) a.log('get_board ' + ((r && r.ok) ? 'OK' : 'FAIL')
+                     + ' in ' + (Date.now() - t0) + 'ms');
+  } catch (e) {}
+  return r || { ok: false, error: 'empty' };
+}
+
+async function tick() {
+  var r;
+  try {
+    trace('fetch');
+    r = await fetchBoard();
+    trace(r && r.ok ? (r.not_modified ? 'ok-304' : 'ok-data') : 'fail');
+  } catch (e) {
+    // fetch 抛异常 = 连不上（DNS/拒连/超时）—— 这是「连不上」而不是「没任务」
+    trace('fetch-err');
+    r = { ok: false, unreachable: true, error: (e && e.name) || 'NetworkError' };
+  }
+
+  try {
+    if (r && r.ok) {
+      FAILS = 0;
+      if (!r.not_modified) {
+        trace('render');
+        applyBundle(r);
+        fitWindow();
+      }
+      var s2 = (r.board && r.board.stats) || {};
+      setStat('共 ' + (s2.total || 0) + ' 个任务'
+              + (s2.stalled ? ' · ' + s2.stalled + ' 个卡住' : ''));
+      // 正常态：展开态 2s；收起态降频到 12s（省流，也因为它不显内容）
+      schedule(CUR_STATE === 'mini' ? 12000 : 2000);
+    } else {
+      FAILS++;
+      // ★ 不再切到「连不上看板服务」那种中间态。
+      //   数据源是本地文件，读不到时给一张**空看板**照样能用，
+      //   底栏说明原因即可 —— 用户要的是"打开就能用"，
+      //   而不是被一个"重试连接"按钮挡住。
+      if (FAILS === 1) {
+        try {
+          window.WB_RELOAD({ _source: 'empty', board: emptyBoard(), events: {} });
+          CUR_STATE = 'expanded';
+          draw();
+        } catch (e) {}
+      }
+      setStat('数据读取失败：' + (r && r.error || '未知'), true);
+      schedule(5000);
+    }
+  } catch (e) {
+    // 渲染阶段出错：把原因摆出来，而不是留一个空白窗口
+    showFatal('渲染失败', ((e && e.stack) || (e && e.message) || String(e)));
+  }
+}
+
+/* ---------------------------------------------------------- 设置 */
+
+function readPanel() {
+  document.getElementById('rf').value = CFG.font;
+  document.getElementById('ra').value = Math.round(CFG.alpha * 100);
+  document.getElementById('vf').textContent = CFG.font + 'px';
+  document.getElementById('va').textContent = Math.round(CFG.alpha * 100) + '%';
+  // 选中哪个主题由按钮自己的 .on 表达。原来还额外写了一个名字标签，
+  // 四个主题名一长就挤，而且和按钮重复。
+  document.querySelectorAll('#theme button').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.t === CFG.theme);
+  });
+  var rt = document.getElementById('rontop');
+  if (rt) rt.checked = !!CFG.on_top;
+}
+
+function bindUI() {
+  var gear = document.getElementById('gear');
+  var panel = document.getElementById('panel');
+  gear.onclick = function () {
+    panel.classList.toggle('show');
+    gear.classList.toggle('on', panel.classList.contains('show'));
+    if (panel.classList.contains('show')) refreshMcp();
+  };
+
+  // ---------------------------------------------------------- MCP 注册
+  /** 刷新 MCP 状态显示。三种状态必须分得清，别糊成"已注册/未注册"两种：
+   *   · 指向本 exe      → 好（别的机器拷 exe 就能用）
+   *   · 指向 Python 脚本 → 能跑，但换机器就断（旧接法）
+   *   · 未注册          → agent 一个任务也记不进来
+   */
+  function refreshMcp() {
+    var el = document.getElementById('vmcp');
+    var a = api();
+    if (!a || !a.mcp_status) { if (el) el.textContent = '宿主不支持'; return; }
+    a.mcp_status().then(function (s) {
+      if (!el) return;
+      el.classList.remove('ok', 'warn');
+      if (!s || s.error) {
+        el.textContent = '读取失败';
+        el.classList.add('warn');
+      } else if (s.installed && s.points_to_exe) {
+        el.textContent = '已接上（指向本程序）';
+        el.classList.add('ok');
+      } else if (s.installed) {
+        el.textContent = '已注册，但指向别处';
+        el.classList.add('warn');
+      } else {
+        el.textContent = '未注册 —— agent 记不进任务';
+        el.classList.add('warn');
+      }
+    }).catch(function () { if (el) el.textContent = '读取失败'; });
+  }
+
+  function showMcpSteps(text) {
+    var box = document.getElementById('mcpsteps');
+    if (!box) return;
+    box.textContent = text || '';
+    box.classList.add('show');
+    fitWindow();
+  }
+
+  var mcpBtn = document.getElementById('mcpbtn');
+  if (mcpBtn) {
+    mcpBtn.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (!a || !a.install_mcp) return;
+      mcpBtn.disabled = true;
+      mcpBtn.textContent = '注册中…';
+      a.install_mcp().then(function (r) {
+        mcpBtn.disabled = false;
+        mcpBtn.textContent = '重新注册';
+        refreshMcp();
+        if (r && r.ok) {
+          showMcpSteps('已写入 ' + r.path
+                       + (r.backup ? '\n备份：' + r.backup : '')
+                       + '\n\n' + (r.steps || ''));
+        } else {
+          showMcpSteps('注册失败：' + ((r && r.error) || '未知错误'));
+        }
+      }).catch(function (err) {
+        mcpBtn.disabled = false;
+        mcpBtn.textContent = '注册';
+        showMcpSteps('注册失败：' + ((err && err.message) || err));
+      });
+    };
+  }
+  // ★ 这里的 ✕ 语义是「收起来」，不是「关掉程序」。
+  //   原来绑的是 api().quit()，而 quit() 的实现是 window.destroy() ——
+  //   窗口被真销毁之后，托盘的「显示挂件」调 window.show() 必然抛异常，
+  //   异常又被静默吞掉 ⇒ 菜单里再也没有可用的恢复入口，
+  //   用户视角就是「关掉之后看板再也显示不出来」。
+  //   改成隐藏到托盘：窗口还在，托盘图标右键就能恢复。（真要退出走托盘菜单的「退出」。）
+  document.getElementById('openboard').onclick = function () {
+    api().open_board();
+  };
+
+  document.getElementById('rf').oninput = function () {
+    CFG.font = +this.value;
+    document.getElementById('vf').textContent = CFG.font + 'px';
+    draw(); fitWindow();
+    api().save_state({ font: CFG.font });
+  };
+  document.getElementById('ra').oninput = function () {
+    CFG.alpha = +this.value / 100;
+    document.getElementById('va').textContent = this.value + '%';
+    draw();
+    api().save_state({ alpha: CFG.alpha });
+  };
+  var rt = document.getElementById('rontop');
+  if (rt) rt.onchange = function () {
+    CFG.on_top = this.checked;
+    var a = api();
+    if (a && a.set_on_top) a.set_on_top(this.checked);
+  };
+
+  document.querySelectorAll('#theme button').forEach(function (b) {
+    b.onclick = function () {
+      CFG.theme = b.dataset.t;
+      readPanel(); draw(); fitWindow();
+      api().save_state({ theme: CFG.theme });
+    };
+  });
+
+  // 右下角缩放柄：拖动改窗口大小
+  var grip = document.getElementById('grip'), dragging = false, sx = 0, sy = 0, sw = 0, sh = 0;
+  grip.addEventListener('mousedown', function (e) {
+    dragging = true; sx = e.screenX; sy = e.screenY;
+    sw = CFG.width; sh = CFG.height;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var w = Math.max(300, Math.min(760, sw + (e.screenX - sx)));
+    var h = Math.max(120, Math.min(900, sh + (e.screenY - sy)));
+    CFG.width = w; CFG.height = h;
+    draw();                       // 字号随宽度联动
+    api().resize(w, h);
+  });
+  window.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false;
+    api().save_state({ width: CFG.width, height: CFG.height });
+  });
+}
+
+/* ---------------------------------------------------------- 启动 */
+
+async function boot() {
+  trace('boot');
+
+  // ★ 超时兜底必须**在这里**设置，不能放在函数末尾。
+  //   上一版写在最后，而卡住时恰恰卡在中间的 await ⇒ 那行永远执行不到
+  //   ⇒ 界面上只剩一句「启动中…」，什么原因都看不到。
+  //   兜底的意义就是"卡住时也能说话"，所以它必须比可能卡住的东西更早挂上。
+  clearTimeout(window.__bootTimer);
+  window.__bootTimer = setTimeout(function () {
+    var f = document.getElementById('fstat');
+    if (f && f.textContent.indexOf('启动中') === 0) {
+      showFatal('启动未完成（20 秒）',
+                '走过的步骤：' + BOOT_TRACE.join(' → ')
+                + String.fromCharCode(10) + String.fromCharCode(10)
+                + '请用 --debug 重开一次看开发者工具。');
+    }
+  }, 20000);
+
+  var a = api();
+  if (!a) return false;
+
+  try {
+    a.log('boot: api 可用, BOARD_URL=' + BOARD_URL
+          + ', 有log=' + (typeof a.log) + ', 有get_config=' + (typeof a.get_config)
+          + ', 有get_state=' + (typeof a.get_state));
+  } catch (e) {}
+
+  try {
+    trace('config');
+    // 配置走 IPC —— 这个接口只读内存，几十微秒；取数才必须走 fetch
+    var cf = await a.get_config();
+    if (cf && cf.ok) {
+      if (cf.signature) SIGN = cf.signature;
+      if (cf.on_top != null) CFG.on_top = !!cf.on_top;
+      if (cf.has_source === false) NO_SOURCE = true;
+      // 首次启动且 MCP 未注册 ⇒ 摆出引导（判据在宿主侧算，见 should_show_mcp_guide）
+      if (cf.show_mcp_guide) SHOW_MCP_GUIDE = true;
+      if (cf.build && cf.build.text) {
+        var vb = document.getElementById('vbuild');
+        if (vb) vb.textContent = cf.build.text;
+      }
+    }
+    trace('state');
+    var st = await a.get_state();
+    if (st && st.ok) {
+      CFG.width = st.width || CFG.width;
+      CFG.height = st.height || CFG.height;
+      CFG.alpha = st.alpha == null ? 1 : st.alpha;
+      // 旧版存的是 theme-a/b/c（那是「布局」，已取消）。直接用会让挂件挂在
+      // 一个不存在的 class 上 —— 表现为样式全丢，而且不报错。所以迁移掉。
+      var OLD_THEME = { 'theme-a': 1, 'theme-b': 1, 'theme-c': 1 };
+      CFG.theme = (!st.theme || OLD_THEME[st.theme]) ? CFG.theme : st.theme;
+      if (st.font) CFG.font = +st.font;
+    }
+  } catch (e) { trace('state-err'); }
+
+  try {
+    trace('ui');
+    bindUI();
+    readPanel();
+    // ★ 必须在读完配置之后调用 —— 而且**以前根本没人调用 setSign()**。
+    //   函数定义了、配置也读进来了，就是没有调用点 ⇒ 底栏署名永远空白。
+    //   这类"代码齐全但没接线"的失效不报错、不告警，只有跟配置一比才发现。
+    setSign();
+  } catch (e) {
+    // 即便 UI 绑定出问题，也要把遮罩摘掉 —— 否则用户永远看到"正在连接"
+    trace('ui-err');
+    showFatal('界面初始化失败', (e && e.stack) || (e && e.message) || String(e));
+  }
+
+  var bootEl = document.getElementById('boot');
+  if (bootEl) bootEl.remove();
+
+  // 动态加载挂件本体（宿主先拿到数据，widget.js 才有东西可渲染）
+  //
+  // ★ 内联版（host.inline.html）里 widget.js 已经由构建流程嵌在页面顶部了，
+  //   这里必须**跳过**，否则同一个文件会被求值两次：
+  //   第二次求值会把 widget.js 的模块级状态（比如折叠状态 COLLAPSED）
+  //   重置成初始值 ⇒ 用户点了收起、两秒后自己弹回来。
+  //   所以判据用"能力是否已存在"，而不是"是不是打包版" —— 前者不受打包方式影响。
+  if (window.renderWidget) {
+    trace('js-inline');
+  } else {
+    trace('load-js');
+    await new Promise(function (resolve) {
+      var s = document.createElement('script');
+      s.src = 'widget.js';
+      s.onload = function () { trace('js-ok'); resolve(); };
+      s.onerror = function () {
+        // 这个错误在真实环境里踩过一次：宿主页面原本放在 widget/host/ 下，
+        // 而 pywebview 的服务根目录 = 传给它的那个 URL 所在目录 ⇒ `../widget.js`
+        // 出不去，必然 404。现在 host.html 与 widget.js 同级，正常不该再触发。
+        document.getElementById('app').innerHTML =
+          '<div class="widget mini"><div class="err">'
+          + '<div class="e1">加载 widget.js 失败</div>'
+          + '<div class="e2">host.html 与 widget.js 必须在同一目录<br>'
+          + '当前页面：<code id="cururl"></code></div>'
+          + '</div></div>';
+        var el = document.getElementById('cururl');
+        if (el) el.textContent = location.href;
+        resolve();
+      };
+      document.body.appendChild(s);
+    });
+  }
+
+  trace('tick');
+  tick();
+  return true;
+}
+
+/* ★ 等 pywebview 就绪：用「事件 + 轮询」双保险，并给一个明确的失败出口。
+ *
+ * 原来只写了 addEventListener('pywebviewready', boot) —— 这是**竞态**：
+ * 如果该事件在注册监听之前就触发过，监听就永远等不到，
+ * 页面停在「正在连接看板…」不动，而且不报错。
+ * （实测踩到：同一个 exe 第一次能起、第二次就卡住，纯粹取决于时序。）
+ *
+ * 更根本的是：**不能存在"永远等待"这个状态**。
+ * 超过 20 秒就掀掉遮罩、把原因摆出来 —— 让用户看见"卡在哪"，
+ * 而不是对着一句"正在连接"干等。
+ */
+function waitForPywebview() {
+  var tries = 0;
+  var MAX = 100;                 // 100 × 200ms = 20s
+  (function poll() {
+    if (api()) { boot(); return; }
+    if (++tries >= MAX) {
+      var el = document.getElementById('boot');
+      if (el) {
+        el.innerHTML =
+          '<div style="text-align:center;padding:18px;line-height:1.7">'
+          + '<div style="color:var(--bad);margin-bottom:6px">无法与宿主通信</div>'
+          + '<div style="font-size:11.5px;color:var(--fg-3)">'
+          + '20 秒内没等到界面桥接就绪。<br>'
+          + '请用 <code>BoardWidget.exe --debug</code> 重开一次，<br>'
+          + '看开发者工具里的报错。</div></div>';
+      }
+      return;
+    }
+    setTimeout(poll, 200);
+  })();
+}
+
+if (api()) boot();
+else {
+  window.addEventListener('pywebviewready', function () { boot(); }, { once: true });
+  waitForPywebview();            // 事件没等到也有轮询兜底
+}
+</script>
+</body>
+</html>

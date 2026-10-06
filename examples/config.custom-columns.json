@@ -1,0 +1,48 @@
+{
+  "_comment": "示例：把看板改造成「发布流程」。演示通用性 —— 只改配置，不动一行代码。",
+
+  "board": {
+    "title": "发布流程看板",
+    "db_path": "./data/release.db",
+
+    "columns": [
+      { "id": "draft",     "title": "草稿",     "color": "gray",  "wip_limit": null, "is_terminal": false },
+      { "id": "review",    "title": "评审中",   "color": "amber", "wip_limit": 3,    "is_terminal": false },
+      { "id": "testing",   "title": "测试中",   "color": "blue",  "wip_limit": 5,    "is_terminal": false },
+      { "id": "staged",    "title": "待发布",   "color": "purple","wip_limit": 2,    "is_terminal": false },
+      { "id": "released",  "title": "已发布",   "color": "green", "wip_limit": null, "is_terminal": true  },
+      { "id": "rejected",  "title": "已驳回",   "color": "red",   "wip_limit": null, "is_terminal": false }
+    ],
+
+    "_transitions_comment": "流程约束：草稿要依次经过评审、测试、待发布才能上线；驳回可回到草稿重来",
+    "transitions": {
+      "draft":    ["review", "rejected"],
+      "review":   ["testing", "draft", "rejected"],
+      "testing":  ["staged", "review", "rejected"],
+      "staged":   ["released", "testing", "rejected"],
+      "released": ["draft"],
+      "rejected": ["draft"]
+    },
+
+    "_fields_comment": "发布流程特有的字段。未定义的键不允许写入，避免拼写错误被静默接受",
+    "fields": [
+      { "key": "version",  "type": "text",   "label": "版本号" },
+      { "key": "owner",    "type": "text",   "label": "负责人" },
+      { "key": "risk",     "type": "enum",   "label": "风险等级",
+        "values": ["低", "中", "高"] },
+      { "key": "rollback", "type": "bool",   "label": "是否需要回滚预案" },
+      { "key": "tickets",  "type": "number", "label": "关联工单数" }
+    ],
+
+    "enforce_wip": true,
+    "refresh_ms": 2000,
+    "hide_empty_columns": false
+  },
+
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8792,
+    "open_browser": false,
+    "allow_write": false
+  }
+}

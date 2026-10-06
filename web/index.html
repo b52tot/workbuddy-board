@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkBuddy Board</title>
+<!-- 内联空 favicon：不写这一行，浏览器会自动请求 /favicon.ico 拿 404，
+     控制台里多一条红色报错，把真正的问题淹掉。用 data URI 消掉噪音。 -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1 id="title">WorkBuddy Board</h1>
+  <span class="sub" id="hb"><span class="dot"></span><span id="updated">连接中…</span></span>
+  <span class="spacer"></span>
+  <div class="stats">
+    <div class="stat"><div class="k">总数</div><div class="v" id="sTotal">0</div></div>
+    <div class="stat"><div class="k">进行中</div><div class="v" id="sActive">0</div></div>
+    <div class="stat"><div class="k">已完成</div><div class="v" id="sDone">0</div></div>
+    <div class="stat"><div class="k">停滞</div><div class="v bad" id="sStalled">0</div></div>
+    <div class="stat"><div class="k">完成率</div><div class="v" id="sPct">0%</div></div>
+  </div>
+  <button id="btnTheme" title="切换深浅色">主题</button>
+</header>
+
+<div class="progress"><i id="bar"></i></div>
+
+<main class="board" id="board">
+  <div class="empty">加载中…</div>
+</main>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="t" id="mTitle">任务详情</span>
+      <button id="mClose">关闭</button>
+    </div>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+
+<div id="toast" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+     background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 16px;
+     font-size:13px;box-shadow:var(--shadow);z-index:99"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

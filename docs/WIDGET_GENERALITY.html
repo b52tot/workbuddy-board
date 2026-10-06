@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>workbuddy-board 技术方案 v2</title><style>
+:root{--ink:#1a1a1a;--sub:#5a5a5a;--line:#e3e3e3;--bg:#fff;--accent:#b8452f;
+      --code-bg:#f6f6f4;--hl:#fff8e6;--ok:#2f7d4f;--bad:#b8452f;}
+*{box-sizing:border-box}
+body{margin:0;background:#f2f1ee;color:var(--ink);
+     font:15px/1.75 "PingFang SC","Microsoft YaHei","Hiragino Sans GB",
+     -apple-system,"Segoe UI",sans-serif;}
+.page{max-width:1000px;margin:0 auto;background:var(--bg);
+      padding:56px 64px 80px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+h1{font-size:27px;margin:0 0 6px;letter-spacing:-.3px;
+   border-bottom:3px solid var(--accent);padding-bottom:14px}
+h2{font-size:21px;margin:44px 0 14px;padding-left:12px;
+   border-left:4px solid var(--accent)}
+h3{font-size:17px;margin:30px 0 10px;color:#000}
+h4{font-size:15px;margin:22px 0 8px;color:var(--sub)}
+p{margin:11px 0}
+blockquote{margin:16px 0;padding:12px 18px;background:var(--hl);
+           border-left:4px solid #d9a441;color:#4a3a12;font-size:14px}
+blockquote p{margin:4px 0}
+hr{border:0;border-top:1px solid var(--line);margin:38px 0}
+code{background:var(--code-bg);padding:2px 6px;border-radius:4px;
+     font:13px/1.5 "Cascadia Mono",Consolas,"Courier New",monospace;
+     color:#8a3a2a;}
+pre{background:#fbfbf9;border:1px solid var(--line);border-radius:8px;
+    padding:16px 18px;overflow-x:auto;margin:16px 0}
+pre code{background:none;padding:0;color:#2b2b2b;font-size:13px;
+         line-height:1.65;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:18px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;
+      vertical-align:top}
+th{background:#faf9f7;font-weight:600;white-space:nowrap}
+tbody tr:nth-child(even){background:#fcfcfb}
+ul,ol{margin:11px 0;padding-left:26px}
+li{margin:5px 0}
+strong{font-weight:600}
+figure{margin:22px 0;text-align:center}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:8px}
+figcaption{font-size:12.5px;color:var(--sub);margin-top:9px}
+@media print{body{background:#fff}.page{box-shadow:none;margin:0;
+  max-width:none;padding:0}pre,table{page-break-inside:avoid}}
+</style></head><body><div class="page"><h1>挂件通用性 · 拓展路线图</h1>
+<blockquote>日期：2026-10-05 ｜ 前置：<code>WIDGET_SELF_BUILD_PLAN.md</code><br>目的：回答「通用性上还能往哪走」——<strong>并说清哪些不该走</strong><br><strong>本文不是待办清单，是取舍依据。</strong> 下面每条都给了"值不值得做"的判断，<br>照第七节那三个问题自己也能判。</blockquote>
+<hr>
+<h2>〇、两类「套得住」各有对应原型（可直接打开看）</h2>
+<table><thead><tr><th>类别</th><th>原型</th><th>怎么开</th></tr></thead><tbody><tr><td><strong>直接套住</strong>（不加任何字段）</td><td><code>widget/index.html#cover</code></td><td>工作台里数据切到「多种任务形态」</td></tr><tr><td><strong>加可选字段就套住</strong></td><td><strong><code>widget/fields-demo.html</code></strong></td><td>双击打开，勾开关看实时变化</td></tr></tbody></table>
+<h3>「直接套住」证明什么</h3>
+<p><code>data-cover.js</code> 里放了 <strong>8 种任务形态</strong>，<strong>只用现有五要素、不加任何新字段</strong>：</p>
+<table><thead><tr><th>形态</th><th>靠什么表达</th></tr></thead><tbody><tr><td>调研型（8B 模型选型）</td><td><strong>无进度</strong> —— 靠标题 + 说明撑住卡片</td></tr><tr><td>代码开发（Rerank 优化）</td><td>进度 <code>43% · 3/7 项优化</code></td></tr><tr><td>数据迁移（kb.db → Milvus）</td><td>进度 <code>61% · 8210/13389</code></td></tr><tr><td>批量跑批（全量重算）</td><td>进度 <code>58% · 824/1410</code></td></tr><tr><td>评测跑批（49 题）</td><td>进度 <code>63% · 31/49</code></td></tr><tr><td>视频下载</td><td>进度 <code>42% · 37/88</code></td></tr><tr><td>硬件验证（NUMA）</td><td><strong>阻塞列</strong> + 停滞标记</td></tr><tr><td>排障（已完成）</td><td><code>finished_at</code> + 耗时</td></tr></tbody></table>
+<p><strong>关键验证点</strong>：那三个<strong>没有进度</strong>的任务（调研 / 阻塞 / 完成）也能显示得清楚 ——
+说明卡片不是"只会画进度条"，标题 + 状态 + 时间本身就能承载信息。
+<strong>如果某类任务在这里表达不出来，它就属于「要加字段」那一类。</strong></p>
+<h3>「加可选字段」证明什么</h3>
+<p><code>fields-demo.html</code> 做成<strong>开关式</strong>：勾一个字段，右边的卡片和详情实时变化。
+<strong>你能直接看到"加这个字段，多出哪条信息"</strong> —— 比看表格直观得多。</p>
+<table><thead><tr><th>字段</th><th>没有它时</th><th>有了它之后</th></tr></thead><tbody><tr><td><code>failed</code></td><td>「失败了」和「卡住了」在卡片上<strong>长得一样</strong></td><td>红条 <code>✗ 失败 2 次 · 批次 311 超时；批次 607 OOM</code></td></tr><tr><td><code>due_at</code></td><td>只知道「<strong>跑了多久</strong>」，不知道「<strong>还剩多久</strong>」</td><td>蓝条 <code>⏰ 还剩 4小时30分</code>，超期自动转红</td></tr><tr><td><code>assignee</code></td><td>多 agent 并行时<strong>不知道哪个是自己要管的</strong></td><td>标签 <code>@agent-A</code>，可据此过滤</td></tr><tr><td><code>steps</code></td><td>只有 <code>43%</code> / <code>3/7</code>，<strong>不知道走到哪一步</strong></td><td>卡片 <code>▤ 3/7 步</code>；详情里 <code>✓批大小调优 ▶KV cache 复用 ○算子融合</code></td></tr><tr><td><code>artifacts</code></td><td>只看到「<strong>完成</strong>」，看不到「<strong>产出了什么</strong>」</td><td>卡片 <code>📎 2</code>；详情里列出 <code>📎 压测对比报告.docx</code></td></tr></tbody></table>
+<p><strong>为什么成本低</strong>：这五个字段全部<strong>可选、挂在任务自己身上</strong>。
+没有它们时卡片照常工作；有它们时多显示一行。
+<strong>不改列结构、不改流转规则、不动已有任务</strong> —— 这正是它和「改数据模型」的区别。</p>
+<hr>
+<h2>一、先划边界：通用性的本质是什么</h2>
+<p>挂件的信息模型就五个要素：</p>
+<pre><code>标题 · 状态(在哪列) · 进度 · 时间(创建/开始/结束/静默) · 阻塞</code></pre>
+<p><strong>能套进这五个要素的，就是通用的；套不进的，硬套一定难看。</strong></p>
+<table><thead><tr><th>能不能套住</th><th>例子</th><th>结论</th></tr></thead><tbody><tr><td>✅ <strong>直接套住</strong></td><td>代码开发、下载、批量跑批、评测、数据迁移</td><td>已经能用</td></tr><tr><td>⚠️ <strong>加可选字段就套住</strong></td><td>截止时间、产物、失败重试、执行者、子步骤</td><td><strong>值得做，成本低</strong></td></tr><tr><td>⚠️ <strong>要改结构</strong></td><td>依赖、周期性</td><td>谨慎，收益/成本比差</td></tr><tr><td>❌ <strong>套不住</strong></td><td>实时监控曲线、对话流、甘特/思维导图</td><td><strong>不要硬套</strong></td></tr></tbody></table>
+<p><strong>判断原则（以后自己也能用）</strong>：</p>
+<blockquote>加<strong>可选字段</strong> ≠ 改<strong>数据模型</strong>。<br>前者向后兼容、不动现有任务；后者要让所有人跟着改。<br><strong>优先加可选字段。</strong></blockquote>
+<hr>
+<h2>二、方向 A：任务形态拓展（加字段，成本最低）</h2>
+<p>这一类的共同点：<strong>只加可选字段，不动现有结构</strong>。</p>
+<table><thead><tr><th>#</th><th>拓展</th><th>呈现</th><th>为什么值得</th><th>成本</th></tr></thead><tbody><tr><td><strong>A1</strong></td><td><strong>失败 / 重试</strong></td><td>卡片上 <code>✗ 失败 2 次</code>，详情里看上次报错</td><td>下载、跑批、CI 都天然会失败重试；现在<strong>失败了和"卡住"看起来一样</strong></td><td>低</td></tr><tr><td><strong>A2</strong></td><td><strong>产物 / 附件</strong></td><td>详情里 <code>📎 报告.docx</code> <code>📎 日志</code>（可点开）</td><td>代码开发、评测类任务的<strong>价值就在产物</strong>上；现在只看到"完成"，看不到"产出了什么"</td><td>低</td></tr><tr><td><strong>A3</strong></td><td><strong>子步骤清单</strong></td><td>详情里一组扁平静态步骤 <code>✓ 依赖编排 · ✓ 迁移 · ▶ 校验 · ○ 报告</code></td><td><strong>这才是"展开看每一步"的正解</strong> —— 比树轻，只加一个数组字段</td><td>低</td></tr><tr><td><strong>A4</strong></td><td><strong>截止时间</strong></td><td><code>⏰ 今天 18:00 前</code>，超期转红</td><td>很多事情有时间要求；现在只有"耗时"，没有"还剩多久"</td><td>低</td></tr><tr><td><strong>A5</strong></td><td><strong>执行者 / 归属</strong></td><td><code>@我</code> / <code>@agent-A</code>，可据此过滤</td><td><strong>多 agent 并行时最需要</strong> —— 一眼知道哪个是我要管的</td><td>低</td></tr><tr><td><strong>A6</strong></td><td><strong>输入 / 输出位置</strong></td><td><code>📥 /vol2/1000/A站精华</code> <code>📤 E:/报告.docx</code></td><td>你现在的下载任务，路径只写在 description 里，卡片上看不到</td><td>低</td></tr></tbody></table>
+<p><strong>这六条的共同特点</strong>：都是<strong>在已有卡片上多一行</strong>，不改列结构、不改流转规则。</p>
+<h3>A3 值得单独说</h3>
+<p>之前明确否掉了「父子任务树」，理由是"不为展示需求改数据模型"。
+但 <strong>A3 不是树</strong> —— 它是一个<strong>扁平有序列表</strong>，挂在任务自己的字段里：</p>
+<pre class="lang-jsonc"><code>"steps": [
+  { "name": "依赖编排", "state": "done" },
+  { "name": "数据迁移", "state": "done" },
+  { "name": "向量校验", "state": "running" },
+  { "name": "出报告",   "state": "pending" }
+]</code></pre>
+<ul><li>不要 <code>parent_id</code>、不要递归、不要显示树形缩进</li><li>就是<strong>一列带状态的点</strong>，在详情里竖着排开</li></ul>
+<p><strong>它比树便宜得多，而回答的是同一个问题</strong>："这东西进行到哪一步了"。
+进度条回答的是"完成多少"，步骤清单回答的是"走到哪了"——<strong>两者不等价</strong>，
+比如"3/7 步"比"43%"更能说明问题。</p>
+<hr>
+<h2>三、方向 B：数据源拓展（成本中等）</h2>
+<table><thead><tr><th>#</th><th>拓展</th><th>呈现</th><th>判断</th></tr></thead><tbody><tr><td><strong>B1</strong></td><td><strong>多看板切换</strong></td><td>顶栏下拉：<code>本机 ▾</code> / <code>192.168.30.121 ▾</code></td><td>⭐ <strong>推荐</strong>。你有服务器上的看板，两个环境来回看是真实需求</td></tr><tr><td><strong>B2</strong></td><td><strong>远程看板</strong></td><td>数据源配 <code>http://192.168.30.121:8791</code></td><td>⭐ 与 B1 一起做；注意<strong>连不上时的提示要和"没任务"区分</strong></td></tr><tr><td><strong>B3</strong></td><td><strong>多实例并排</strong></td><td>同时挂两个看板</td><td>⚠️ 谨慎。桌面会被占满；B1 的切换更实用</td></tr><tr><td><strong>B4</strong></td><td><strong>异构源聚合</strong>（CI / 监控 / 工单）</td><td>——</td><td>❌ <strong>不做</strong>。挂件会被推着长成"万能面板"，而那一定会失去焦点</td></tr></tbody></table>
+<p><strong>B1+B2 的实际价值</strong>：你现在是"本机看板 + 远程服务器干活"的工作方式，
+挂件只显示本机的，就漏掉了真正在跑的那个环境。</p>
+<hr>
+<h2>四、方向 C：交互拓展</h2>
+<table><thead><tr><th>#</th><th>拓展</th><th>呈现</th><th>判断</th></tr></thead><tbody><tr><td><strong>C1</strong></td><td><strong>卡片快捷操作</strong></td><td>悬停出现 <code>✓ 完成</code> <code>⏸ 暂停</code></td><td>⭐ <strong>推荐，但有前提</strong>：写操作走 MCP 是既有原则，挂件要写就得给一条<strong>受限的写通道</strong>（只允许几个安全动作）</td></tr><tr><td><strong>C2</strong></td><td><strong>过滤 / 搜索</strong></td><td>按标签、按执行者、只看卡住的</td><td>⭐ 推荐（任务一多就需要）。可以很轻：<strong>只做"只看卡住的"这一个开关</strong></td></tr><tr><td><strong>C3</strong></td><td><strong>新卡住时通知</strong></td><td>系统通知</td><td>⚠️ <strong>谨慎</strong>。OrbCue 的教训就在这 —— 提醒很容易变噪音。要做就<strong>只在"从正常变卡住"那一次</strong>响，不是每次刷新都响</td></tr><tr><td><strong>C4</strong></td><td><strong>拖拽改状态</strong></td><td>卡片拖到别的列</td><td>⚠️ 谨慎。桌面挂件里拖拽的手感很难做好，而<strong>收益不如在 Web 看板里拖</strong></td></tr></tbody></table>
+<p><strong>C1 的前提值得强调</strong>：现在 <code>allow_write=false</code>，挂件是纯只读的。
+要给写能力，应该是<strong>白名单式的几个动作</strong>，不是把整个写 API 打开。</p>
+<hr>
+<h2>五、明确不做（写下来防止被加回来）</h2>
+<table><thead><tr><th>不做</th><th>为什么</th></tr></thead><tbody><tr><td>❌ 实时监控曲线</td><td>那需要时间序列，不是任务模型；<strong>套不住就别套</strong></td></tr><tr><td>❌ 对话流 / 聊天记录</td><td>又一个"套不住"</td></tr><tr><td>❌ 甘特图 / 时间线视图</td><td>挂件只有 320-760px，甘特图在这个宽度里没有可读性</td></tr><tr><td>❌ 复杂树 / 依赖图</td><td>已有结论：不为展示需求改数据模型</td></tr><tr><td>❌ 挂件内编辑任务全文</td><td>编辑走 Web 看板或 MCP</td></tr><tr><td>❌ 多用户协作编辑</td><td>单机工具，别引入协作复杂度</td></tr><tr><td>❌ 异构源聚合（CI/监控/工单）</td><td>会让挂件失去焦点</td></tr></tbody></table>
+<hr>
+<h2>六、优先级：如果只做三件</h2>
+<p>按 <strong>价值/成本比</strong> 排，前三名是：</p>
+<table><thead><tr><th>排名</th><th>拓展</th><th>理由</th></tr></thead><tbody><tr><td><strong>1</strong></td><td><strong>A1 失败/重试</strong> + <strong>A2 产物</strong></td><td>现在"失败"和"卡住"长得一样 —— 这是<strong>信息缺失</strong>，不只是"不够通用"</td></tr><tr><td><strong>2</strong></td><td><strong>A3 子步骤清单</strong></td><td>用最低成本回答"走到哪一步了"，比树便宜得多</td></tr><tr><td><strong>3</strong></td><td><strong>B1+B2 多看板/远程看板</strong></td><td>你的真实工作方式是"本机 + 服务器"，现在只覆盖了一半</td></tr></tbody></table>
+<p>次选：A4 截止时间、A5 执行者、C2 只看卡住的。</p>
+<hr>
+<h2>七、一条判断原则（以后照这个用）</h2>
+<blockquote><strong>问三个问题：</strong><br>1. 它能塞进「标题 + 状态 + 进度 + 时间 + 阻塞」这五个要素吗？<br>塞不进 ⇒ 大概率不该做。<br>2. 是<strong>加可选字段</strong>，还是要<strong>改结构</strong>？<br>改结构 ⇒ 先问"不改结构能不能回答同一个问题"。<br>3. 它是<strong>补上缺失的信息</strong>，还是<strong>多一种看法</strong>？<br>只是多一种看法 ⇒ 价值通常低于"补上缺失"。<br>A1/A2 命中第 3 条的"补上缺失"，所以排第一；<br>甘特图命中第 1 条和第 3 条，所以不做。</blockquote></div></body></html>

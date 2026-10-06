@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>加字段演示 · frame</title>
+<link rel="stylesheet" href="widget.css">
+<style>
+body{margin:0;padding:10px;background:transparent;
+     font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+/* 棋盘底，看得清透明度 */
+.checker{
+  background-image:linear-gradient(45deg,#1a1f26 25%,transparent 25%),
+                   linear-gradient(-45deg,#1a1f26 25%,transparent 25%),
+                   linear-gradient(45deg,transparent 75%,#1a1f26 75%),
+                   linear-gradient(-45deg,transparent 75%,#1a1f26 75%);
+  background-size:14px 14px;
+  background-position:0 0,0 7px,7px -7px,-7px 0;
+  border-radius:12px; padding:10px;
+}
+</style>
+</head>
+<body>
+<div class="checker"><div id="mount"></div></div>
+
+<script>
+// ============================================================
+// 基础任务：只有「标题·状态·进度·时间·阻塞」这五个要素
+// 勾选的每个字段，都是**额外加**上去的 —— 用它来证明"加了字段多出什么"
+// ============================================================
+var BASE = {
+  id: 'x1',
+  title: 'RAG-Rerank 服务推理性能优化',
+  description: '目标：单请求 P95 降到可接受区间；当前瓶颈在 CPU 侧的批处理与线程绑定',
+  column_id: 'doing',
+  priority: 10,
+  tags: ['rag', '性能'],
+  fields: { progress: { current: 3, total: 7, message: '已完成 3/7' } },
+  started_at: new Date(Date.now() - 3 * 3600e3).toISOString(),
+  finished_at: null,
+  idle_sec: 150
+};
+
+// 可选字段池：勾上就注入，去掉就拿走
+var OPT = {
+  steps: [
+    { name: '批大小调优',    state: 'done' },
+    { name: '线程绑定',      state: 'done' },
+    { name: 'tensor 复用',   state: 'done' },
+    { name: 'KV cache 复用', state: 'running' },
+    { name: '算子融合',      state: 'pending' },
+    { name: '端到端压测',    state: 'pending' },
+    { name: '出对比报告',    state: 'pending' }
+  ],
+  failed: { count: 2, message: '批次 311 超时；批次 607 OOM' },
+  due_at: new Date(Date.now() + 4.5 * 3600e3).toISOString(),
+  assignee: 'agent-A',
+  artifacts: [
+    { name: '压测对比报告.docx', note: '结论：P95 ↓ 41%' },
+    { name: 'profile-2026-10-05.json' }
+  ]
+};
+
+var on = (new URLSearchParams(location.search).get('f') || '').split(',').filter(Boolean);
+var task = JSON.parse(JSON.stringify(BASE));
+on.forEach(function (k) { if (OPT[k] !== undefined) task.fields[k] = OPT[k]; });
+
+// 组装成 widget.js 认识的数据形状
+window.WB_DATA = {
+  _source: 'demo',
+  _fetched_at: null,
+  board: {
+    title: 'RAG-Rerank 优化',
+    columns: [
+      { id: 'todo', title: '待办', color: 'gray', is_terminal: 0, wip_limit: null },
+      { id: 'doing', title: '进行中', color: 'blue', is_terminal: 0, wip_limit: 5 },
+      { id: 'blocked', title: '阻塞', color: 'red', is_terminal: 0, wip_limit: null },
+      { id: 'done', title: '已完成', color: 'green', is_terminal: 1, wip_limit: null }
+    ],
+    tasks_by_column: { todo: [], doing: [task], blocked: [], done: [] },
+    stats: { total: 1, finished: 0, active: 1, percent: 0, agg_progress: 42.9,
+             stalled: 0, stall_threshold_sec: 90,
+             per_column: { todo: 0, doing: 1, blocked: 0, done: 0 } },
+    stalled_ids: [],
+    server_seq: 1
+  },
+  events: {
+    x1: [
+      { seq: 3, task_id: 'x1', kind: 'advance', from_col: null, to_col: null, actor: 'agent',
+        detail: { field: 'progress', value: { current: 3, total: 7 } },
+        created_at: new Date(Date.now() - 20 * 60e3).toISOString() },
+      { seq: 2, task_id: 'x1', kind: 'move', from_col: 'todo', to_col: 'doing', actor: 'agent',
+        detail: null, created_at: new Date(Date.now() - 3 * 3600e3).toISOString() },
+      { seq: 1, task_id: 'x1', kind: 'create', from_col: null, to_col: 'todo', actor: 'agent',
+        detail: { title: BASE.title }, created_at: new Date(Date.now() - 3.2 * 3600e3).toISOString() }
+    ]
+  }
+};
+</script>
+<script src="widget.js"></script>
+<script>
+// 由 URL 决定展示哪个视图：卡片（展开态）还是详情
+var view = new URLSearchParams(location.search).get('v') || 'expanded';
+window.renderWidget(document.getElementById('mount'), view, {
+  theme: 'theme-a', width: 320, alpha: 1, taskId: 'x1'
+});
+</script>
+</body>
+</html>

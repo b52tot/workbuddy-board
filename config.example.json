@@ -1,0 +1,84 @@
+{
+  "_comment": "WorkBuddy Board 配置模板。复制为 config.json 后按需修改。所有键均可省略，省略即用内置默认值。",
+  "board": {
+    "title": "WorkBuddy Board",
+    "db_path": "./data/board.db",
+    "_columns_comment": "栏目定义。id 是稳定标识（改 id 等于换列，旧任务会找不到列）；position 由数组顺序决定；color 取 gray/blue/amber/green/red/purple/teal/pink/coral 之一；wip_limit 为 null 表示不限；is_terminal=true 的列视为终态（用于统计完成率）；orb_state 可选，声明该列对应 OrbCue 的哪种语义（目前支持 permission），不写则按「终态→complete、非终态→working」推断",
+    "columns": [
+      {
+        "id": "todo",
+        "title": "待办",
+        "color": "gray",
+        "wip_limit": null,
+        "is_terminal": false
+      },
+      {
+        "id": "doing",
+        "title": "进行中",
+        "color": "blue",
+        "wip_limit": 5,
+        "is_terminal": false
+      },
+      {
+        "id": "blocked",
+        "title": "阻塞",
+        "color": "red",
+        "wip_limit": null,
+        "is_terminal": false,
+        "orb_state": "permission"
+      },
+      {
+        "id": "done",
+        "title": "已完成",
+        "color": "green",
+        "wip_limit": null,
+        "is_terminal": true
+      }
+    ],
+    "_transitions_comment": "状态流转白名单。未列出的流转会被拒绝，并提示该列允许的目标。想允许任意流转就把它设成 [[所有列] -> [所有列]]",
+    "transitions": {
+      "todo": [
+        "doing",
+        "blocked",
+        "done"
+      ],
+      "doing": [
+        "todo",
+        "blocked",
+        "done"
+      ],
+      "blocked": [
+        "todo",
+        "doing",
+        "done"
+      ],
+      "done": [
+        "todo"
+      ]
+    },
+    "_fields_comment": "自定义字段。type 支持 text/number/enum/bool/progress；enum 需给 values 数组；progress 必须有 label（用于渲染进度条）。未在此定义的键不允许写入，避免拼写错误被静默接受",
+    "fields": [
+      {
+        "_comment": "progress 示例：长耗时任务用。MCP 用 update_progress 推进；进度只增不减，回退会被显式拒绝",
+        "key": "progress",
+        "type": "progress",
+        "label": "进度"
+      }
+    ],
+    "enforce_wip": true,
+    "refresh_ms": 1000,
+    "hide_empty_columns": false
+  },
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8791,
+    "open_browser": false,
+    "allow_write": false
+  },
+  "orbcue": {
+    "_comment": "桌面小球（OrbCue）事件桥。默认关。开启前请确认 OrbCue 已安装且 presenter 在运行；source 决定小球上的分组标签；exe 留空则自动找 PATH 或 %LOCALAPPDATA%\\OrbCue\\orb.exe",
+    "enabled": false,
+    "exe": null,
+    "source": "workbuddy"
+  }
+}

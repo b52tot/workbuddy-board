@@ -1,0 +1,426 @@
+/* ============================================================
+   任务挂件 · 样式表
+   ------------------------------------------------------------
+   ★ 这是前端设计唯一需要改的文件（配合 widget.html / alt-*.html 的结构）
+      改完直接刷新浏览器即可看到效果，不需要重编译。
+
+   约束（改样式时请保留）：
+   1. 配色一律用下面 :root 里的变量，不要写死色值 ——
+      挂件必须和看板同源，这是上一版被否的原因之一。
+   2. 语义色不可改：停滞=--warn、完成=--ok、失败=--bad、进行中=--accent。
+   3. 宽度固定 320px（挂件窗口宽度），任何元素都不许把它撑出横向滚动。
+   4. 标题 2 行截断、说明 1 行截断 —— 保住"看得出是哪一个"的同时不撑高卡片。
+
+   四套主题（挂件根元素上的 class 切换）。**排版一律继承"紧凑"那一套**，
+   主题只换配色（和背景图），所以换主题不会让信息量变多变少 ——
+   「布局」那个维度已经删掉了（紧凑/宽松/卡住优先 的差异太小，不值得占一个面板位）：
+     .theme-midnight  午夜蓝     —— 冷 · 深（Win11 深色 Fluent 的方向）
+     .theme-amber     琥珀石墨   —— 暖 · 深（默认）
+     .theme-ink       亚克力白   —— 明 · 浅（白天/投屏用）
+     .theme-ex        前妻整容前 —— 绿调 + 原图当背景（两个大鼻孔是主角）
+
+   可变尺寸与透明度（挂件窗口属性，由 widget.js 写在挂件根元素上）：
+     --w          窗口宽度（可拖，默认 320）
+     --scale      字号系数，由**字号**推出（见 host.html 的 scaleFor）
+     --bg-alpha   背景不透明度 —— 只影响"背景调多透"
+     --win-alpha  **整个前端**的不透明度 —— 连文字一起透（面板里的「透明度」调的是它）
+   ============================================================ */
+
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128;
+  --line:#30363d; --line-soft:#21262d;
+  --fg:#e6edf3; --fg-2:#9198a1; --fg-3:#7d8590;
+  /* ★ --fg-3 是"最淡的那一档"，底栏的「共 N 个任务」只有 10px 就走它。
+     原来四套主题这一档全在 3.0~4.0:1（WCAG AA 要求 4.5:1）——
+     也就是"颜色确实换了、但换完读不清"。下面四套都按 ≥4.5:1 重算过，
+     色相/饱和度保持原样，只把明度挪了一档。核算法见 .workbuddy/tmp/contrast.py。 */
+  --accent:#4493f8; --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+
+  --radius:8px; --radius-lg:12px;
+  --w:320px;
+  --scale:1;
+  --bg-alpha:1;
+  --win-alpha:1;          /* 整个前端的不透明度 */
+  --fs-title:12.5px;
+  --fs-meta:10.5px;
+  --pad-card:8px 10px;
+  --gap-card:6px;
+}
+
+/* 尺寸相关的量一律写成 calc(x * var(--scale))，
+   这样"放大"时字号与间距同步长，不会出现大窗口里挤着小字。 */
+.tw{ font-size:calc(var(--fs-meta) * var(--scale)) }
+
+/* ---------------------------------------------------------- 四套主题
+   排版参数四套**完全一致**（就是原来"紧凑"那一套），只有颜色不同 ——
+   这样切换主题时信息密度不变，比较的才是主题本身。 */
+.theme-midnight, .theme-amber, .theme-ink, .theme-ex{
+  --fs-title:12.5px; --fs-meta:10.5px; --pad-card:8px 10px; --gap-card:6px;
+}
+
+/* 午夜蓝 —— 冷 · 深 */
+.theme-midnight{
+  --bg:#0a0f1c; --surface:#101728; --surface-2:#182135;
+  --line:#26324a; --line-soft:#1a2334;
+  --fg:#e9eefc; --fg-2:#95a3c2; --fg-3:#7581a4;   /* fg-3 3.82→4.62 */
+  --accent:#4f8dfd; --ok:#3fd07a; --bad:#ff6b6b; --warn:#e8b339;
+  --on-accent:#ffffff;
+}
+
+/* 琥珀石墨 —— 暖 · 深（默认）。
+   整体调暖（不只是强调色），否则在缩略图/远看下和午夜蓝分不出来。 */
+.theme-amber{
+  --bg:#17130c; --surface:#221b11; --surface-2:#2e2416;
+  --line:#3d3121; --line-soft:#2a2115;
+  --fg:#f7f0e2; --fg-2:#b3a488; --fg-3:#968360;   /* fg-3 3.75→4.63 */
+  --accent:#f5a524; --ok:#4cc38a; --bad:#ff7a6b; --warn:#f5a524;
+  --on-accent:#1a1305;      /* 琥珀底上白字读不清 */
+}
+
+/* 亚克力白 —— 明 · 浅。
+   ★ 浅色下文字色必须**显式钉住**：widget.css 里 .ttl/.ctitle/.gtitle 原本都没写
+     color，靠继承宿主页面；深色主题上看不出来，浅底立刻露馅（白底 + 宿主浅灰字）。 */
+.theme-ink{
+  --bg:#f4f7fb; --surface:#ffffff; --surface-2:#eef2f8;
+  --line:#dbe2ec; --line-soft:#e8edf5;
+  --fg:#16202f; --fg-2:#5c6779; --fg-3:#6a758a;   /* fg-3 3.02→4.64，白底上这条最要紧 */
+  --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
+  --on-accent:#ffffff;
+}
+
+/* 前妻整容前 —— 绿调 + 原图当背景。
+   令牌沿用用户那条对话里的取名（--ex-*），两个会话将来合流不会打架。 */
+.theme-ex{
+  --bg:#0d1c10; --surface:#132619; --surface-2:#1b3320;
+  --line:#2b4a2e; --line-soft:#1d3521;
+  --fg:#e8f2e2; --fg-2:#9fb99a; --fg-3:#779170;   /* fg-3 4.04→4.60 */
+  --accent:#eed77b; --ok:#acd18b; --bad:#e8735f; --warn:#e0a53c;
+  --on-accent:#141a0d;      /* 腹部黄底上白字读不清 */
+  --ex-matcha:#acd18b; --ex-chip:#96bbe4; --ex-ink:#2d3013;
+  --ex-yolk:#eed77b; --ex-paper:#ffffff;
+}
+/* 浅色主题下把文字色钉死（理由见上） */
+.theme-ink .widget{ color:var(--fg) }
+
+*{box-sizing:border-box}
+
+/* ---------------------------------------------------------- 挂件外框 */
+.widget{
+  width:var(--w);
+  /* 半透明时背景要真的透出去，文字保持不透明 ——
+     挂件常驻桌面，挡住后面的东西比看不清更烦人。 */
+  background:color-mix(in srgb, var(--bg) calc(var(--bg-alpha) * 100%), transparent);
+  border:1px solid color-mix(in srgb, var(--line) calc(var(--bg-alpha) * 100% + 10%), transparent);
+  border-radius:var(--radius-lg);
+  overflow:hidden; display:flex; flex-direction:column;
+  max-height:var(--maxh, 460px);   /* 常驻窗口的高度上限，超出内部滚动 */
+  backdrop-filter:blur(6px);
+}
+.widget.mini{ max-height:none }
+
+/* 宽到一定程度就并排两列 —— 「放大」的意义是看到更多，而不是字更大 */
+.widget.wide > .cols2{
+  display:grid; grid-template-columns:1fr 1fr; gap:0;
+}
+.widget:not(.wide) > .cols2{ display:block }
+
+/* 半透明时，卡片面也要跟着透，否则只有外壳透明、里面还是实心 */
+.widget{ --surf:color-mix(in srgb, var(--surface) calc(var(--bg-alpha) * 100%), transparent); }
+.widget .bar,
+.widget .ghead:hover,
+.widget .card,
+.widget .dhead,
+.widget .minibar,
+.widget .srcbar,
+.widget .tag,
+.widget .btn{ background-color:var(--surf) }
+
+/* ---------------------------------------------------------- 顶栏 */
+.bar{
+  display:flex; align-items:center; gap:9px;
+  padding:calc(9px * var(--scale)) calc(11px * var(--scale)); background:var(--surface);
+  border-bottom:1px solid var(--line); flex:0 0 auto;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.dot.bad{background:var(--bad)}
+.ttl{font-size:calc(12.5px * var(--scale)); font-weight:600; flex:1; white-space:nowrap;
+     overflow:hidden; text-overflow:ellipsis}
+.pill{font-size:calc(11px * var(--scale)); padding:1.5px 7px; border-radius:999px;
+      background:var(--surface-2); border:1px solid var(--line); color:var(--fg-2);
+      white-space:nowrap; font-variant-numeric:tabular-nums}
+.pill.alert{color:var(--warn); border-color:#5a4200;
+            background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.pill.ok{color:var(--ok); border-color:#1c4d28;
+         background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.icobtn{width:22px;height:22px;border:1px solid transparent;border-radius:6px;
+        background:transparent;color:var(--fg-3);cursor:pointer;font-size:calc(12px * var(--scale));
+        display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.icobtn:hover{border-color:var(--line);color:var(--fg)}
+
+/* 数据来源角标：live / sample。原型期需要它 —— 免得把样例数据当成真的 */
+.srcbar{
+  font-size:calc(10px * var(--scale)); color:var(--fg-3); background:var(--surface-2);
+  border-bottom:1px solid var(--line-soft); padding:calc(2.5px * var(--scale)) calc(11px * var(--scale));
+  display:flex; gap:6px; align-items:center;
+}
+.srcbar .live{color:var(--ok)}
+.srcbar .demo{color:var(--accent)}
+.srcbar .sample{color:var(--warn)}
+
+/* ---------------------------------------------------------- 完成率条 */
+.rate{height:3px;background:var(--surface-2);flex:0 0 auto}
+.rate i{display:block;height:100%;background:var(--accent)}
+
+/* ---------------------------------------------------------- 列组 */
+.grp{flex:0 0 auto}
+.grp + .grp{border-top:1px solid var(--line-soft)}
+.ghead{display:flex;align-items:center;gap:7px;padding:calc(7px * var(--scale)) calc(11px * var(--scale));
+       cursor:pointer;user-select:none}
+.ghead:hover{background:var(--surface)}
+.cbar{width:3px;height:12px;border-radius:2px;background:var(--fg-3);flex:0 0 auto}
+.gtitle{font-size:calc(12px * var(--scale));font-weight:600;flex:1}
+.gcount{font-size:calc(11px * var(--scale));color:var(--fg-3);font-variant-numeric:tabular-nums;
+        flex:0 0 auto}
+.gwip{font-size:calc(10.5px * var(--scale));color:var(--warn);flex:0 0 auto}
+/* 列头里的停滞角标（替代原先"把停滞任务搬出本列另立分区"的做法） */
+.gstall{font-size:calc(10.5px * var(--scale));color:var(--warn);
+        font-variant-numeric:tabular-nums;flex:0 0 auto}
+.chev{font-size:calc(9px * var(--scale));color:var(--fg-3)}
+
+/* 主题 C 的「卡住」分区：橙底表头，一眼压过其他组 */
+.prio-group > .ghead{background:color-mix(in srgb,var(--warn) 9%,transparent);                     border-left:3px solid var(--warn)}
+.prio-group > .ghead .gtitle{color:var(--warn)}
+
+/* ---------------------------------------------------------- 任务卡片 */
+.cards{padding:0 calc(8px * var(--scale)) calc(8px * var(--scale))}
+
+/* ★★ 这条曾经**漏了**，是"收起/展开箭头点了没反应"的真正原因。
+ *
+ *   JS 侧一直在做 `cards.classList.toggle('hidden')` —— 代码没错、class 也确实
+ *   来回切换了，但 CSS 里**从来没有 `.hidden` 这条规则** ⇒ 界面一个像素都不动。
+ *   而当时的测试只断言 `classList.contains('hidden')`，于是全绿。
+ *
+ *   教训：**断言"状态变了"不等于断言"用户看得见的变化"。**
+ *   凡是靠 class 控制显隐/显眼的地方，测试就必须量**计算后的样式或尺寸**，
+ *   不能只读 class 列表。
+ *
+ *   写成 `.cards.hidden` 而不是裸 `.hidden`：限定作用域，
+ *   避免将来别处用到同名 class 时被意外隐藏。
+ */
+.cards.hidden{display:none}
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-left:3px solid var(--fg-3); border-radius:var(--radius);
+  padding:var(--pad-card); margin-bottom:var(--gap-card); cursor:pointer;
+}
+.card:hover{border-color:var(--accent);border-left-color:var(--accent)}
+.card:last-child{margin-bottom:0}
+.card.stall{border-left-color:var(--warn)}      /* 停滞：橙，不是红 */
+.card.done{border-left-color:var(--ok);opacity:.72}
+
+.ctitle{font-size:calc(var(--fs-title) * var(--scale));font-weight:500;line-height:1.4;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cdesc{font-size:calc((var(--fs-meta) + 1px) * var(--scale));color:var(--fg-3);margin-top:3px;
+       display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+
+/* 进度条：warn 色 = "在动"；与顶栏完成率 accent 色刻意分开 */
+.pwrap{margin-top:6px}
+.pbar{height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--warn);border-radius:2px}
+.pbar.ok i{background:var(--ok)}
+.pmeta{display:flex;gap:6px;align-items:baseline;margin-top:3px;
+       font-size:calc(var(--fs-meta) * var(--scale));color:var(--fg-3);font-variant-numeric:tabular-nums}
+.pmeta .pc{color:var(--fg-2);font-weight:600}
+.pmeta .pnum{margin-right:auto}
+.pmeta .pmsg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52%}
+
+.stallmsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+          font-size:calc(var(--fs-meta) * var(--scale));
+          color:var(--warn);background:color-mix(in srgb,var(--warn) 11%,transparent)}
+.cmeta{display:flex;gap:6px;align-items:center;margin-top:6px;
+       font-size:calc(var(--fs-meta) * var(--scale));color:var(--fg-3);flex-wrap:wrap}
+.tag{background:var(--surface-2);border:1px solid var(--line-soft);
+     border-radius:4px;padding:0 4px;color:var(--fg-2)}
+.prio{color:var(--bad);font-weight:600}
+.el{font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+
+/* ---------------------------------------------------------- 详情视图 */
+.dhead{display:flex;align-items:center;gap:8px;padding:calc(9px * var(--scale)) calc(11px * var(--scale));
+       background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto}
+.dtitle{font-size:calc(var(--fs-title) * var(--scale));font-weight:600;flex:1;line-height:1.35}
+.dbody{padding:calc(10px * var(--scale)) calc(11px * var(--scale));overflow-y:auto}
+.kv{display:grid;grid-template-columns:52px minmax(96px,1fr);gap:5px 9px;
+    font-size:calc((var(--fs-meta) + 1px) * var(--scale))}
+.kv .k{color:var(--fg-3);white-space:nowrap}
+.kv .v{color:var(--fg);word-break:break-word}
+/* ★ 值列必须有个下限。
+   原来是 `grid-template-columns:52px 1fr` —— 而 `1fr` 的轨道下限是 `auto`，
+   也就是 **min-content**：容器一被压窄，这一列可以一路缩到「一个汉字宽」，
+   于是中文就变成一字一行（用户报的"状态文字竖着排列"）。
+   改成 minmax(96px, 1fr)：宁可让容器横向溢出/出现滚动条，
+   也不要把内容变得没法读 —— 可读性优先于"不溢出"。
+   `.k` 加 nowrap 是为了让标签（所在列/优先级/状态）保持单行，
+   否则短标签也会跟着折行，把两列的对齐关系带乱。 */
+.sect{margin-top:11px;padding-top:9px;border-top:1px solid var(--line-soft)}
+.sect .h{font-size:calc(11px * var(--scale));color:var(--fg-3);margin-bottom:5px}
+.ev{display:flex;gap:7px;font-size:calc(11px * var(--scale));padding:2.5px 0;
+    border-bottom:1px solid var(--line-soft)}
+.ev:last-child{border-bottom:0}
+.ev .t{color:var(--fg-3);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ev .k2{color:var(--accent);flex:0 0 auto;min-width:52px}
+.ev .d{color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------------------------------------------------------- 收起态 */
+.minibar{display:flex;align-items:center;gap:8px;padding:calc(8px * var(--scale)) calc(12px * var(--scale));
+         background:var(--surface);cursor:pointer}
+.mini .txt{font-size:calc(12px * var(--scale));flex:1}
+.mini .txt .num{font-weight:600;font-variant-numeric:tabular-nums}
+.mini .txt .alert{color:var(--warn)}
+
+/* ---------------------------------------------------------- 服务不可达 */
+.err{padding:16px 13px;text-align:center}
+.err .e1{font-size:calc(12.5px * var(--scale));color:var(--bad);margin-bottom:5px}
+.err .e2{font-size:calc(11.5px * var(--scale));color:var(--fg-3);margin-bottom:11px;line-height:1.5}
+.err code{background:var(--surface-2);padding:0 4px;border-radius:3px;
+          font-size:calc(11px * var(--scale));color:var(--fg-2)}
+.btn{font:inherit;font-size:calc(11.5px * var(--scale));padding:4px 11px;border-radius:6px;
+     background:var(--surface-2);color:var(--fg);border:1px solid var(--line);cursor:pointer}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* 空态（真的一个任务都没有）—— 必须与「服务不可达」长得完全不同 */
+.empty{padding:22px 13px;text-align:center;color:var(--fg-3);font-size:calc(12px * var(--scale))}
+.empty .big{font-size:calc(15px * var(--scale));color:var(--fg-2);margin-bottom:5px}
+
+/* 失败：用 bad 色，不是 warn —— 「卡住」和「失败」要人做的事不同
+   （卡住=去看看，失败=得重跑或排查）。两者长得一样就是信息缺失。 */
+.failmsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+         font-size:calc(var(--fs-meta) * var(--scale));
+         color:var(--bad);background:color-mix(in srgb,var(--bad) 11%,transparent)}
+
+/* 子步骤：扁平列表，不做缩进/树。三种状态靠符号+颜色区分。 */
+.step{display:flex;gap:6px;align-items:baseline;
+      font-size:calc(var(--fs-meta) * var(--scale) * 1.08);padding:2px 0}
+.step .sm{width:11px;flex:0 0 auto;text-align:center}
+.step.done{color:var(--fg-3)}
+.step.done .sm{color:var(--ok)}
+.step.running{color:var(--fg)}
+.step.running .sm{color:var(--warn)}
+.step.pending,
+.step.pending .sm{color:var(--fg-3)}
+
+/* ---- 「加一个可选字段，卡片就多一条信息」用到的样式 ---- */
+
+/* A4 截止时间：accent 色（"还有时间"），超期转 bad */
+.duemsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;
+        font-size:calc(var(--fs-meta) * var(--scale));
+        color:var(--accent);background:color-mix(in srgb,var(--accent) 11%,transparent)}
+.duemsg.over{color:var(--bad);background:color-mix(in srgb,var(--bad) 11%,transparent)}
+
+/* A5 执行者 */
+.who{color:var(--accent)}
+
+/* A3 步骤 / A2 产物的卡片内计数 */
+.stepsc,.artsc{color:var(--fg-3);font-variant-numeric:tabular-nums}
+
+/* A2 产物列表（详情里） */
+.art{display:flex;gap:6px;align-items:baseline;padding:2.5px 0;
+     font-size:calc(var(--fs-meta) * var(--scale) * 1.08)}
+.art .ai{flex:0 0 auto}
+.art .an{color:var(--fg)}
+.art .ad{color:var(--fg-3);margin-left:auto;flex:0 0 auto}
+
+/* ============================================================
+   「前妻整容前」的背景大图
+   ------------------------------------------------------------
+   ★ 参数与结构**照抄**用户另一条对话里已经做好的实现
+     （outputs/exwife-mode/exwife.css），因为他们那边是**量过**的：
+       · 鼻孔面积 215/213，是眼睛（23/20）的十倍 ⇒ 它就是这张脸的辨识锚点
+       · 全身图有几何死结（保鼻孔就必切眼睛）⇒ 只能用脸特写或让脸落进顶部带
+       · 面部遮罩坐标 (75%,30%) 与脸中心横跨 x 61%~96% 都是实测值
+     自己重推一遍只会更差，还会把人家踩过的坑再踩一遍。
+
+   两层结构（关键）：
+     i = 虚化整图，做氛围
+     b = **同几何**（同一套 --bgw/--bgx/--bgtop/background-size）的低虚化高对比副本，
+         只用一个径向遮罩把"脸"透出来 ⇒ 观感是"背景虚化、主体清晰"，
+         而且不需要新素材、不需要算偏移。
+   ★ 锚点用 **top** 不用 bottom：--bgy 是相对挂件高度的百分比，
+     任务一多挂件变高，整张图会被推下去，头顶那条弧线就掉进卡片墙里了。
+   ============================================================ */
+.theme-ex .ex-bg{
+  position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0;
+  border-radius:inherit;
+  --bgimg:url(data:image/png;base64,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);
+  --bgar:.8368;                    /* 200/239，素材原始比例 */
+  /* ★ 尺寸按**挂件高度**算，不按宽度百分比。
+     踩过的坑：--bgw:180% 是按宽度算的**固定**值，而挂件高度随任务数变 ——
+     任务少的时候（3~4 个）图相对过大，整张脸糊满挂件，看着像一块绿斑、
+     读不出是一只恐龙；任务多的时候又偏小。
+     高度百分比 `height:125%` 是跟容器走的 ⇒ 任务多少构图都不跑偏。 */
+  --bgh:125%; --bgx:-13%; --bgtop:-8%;
+  --bgblur:2.2px; --bgop:.52; --bgsat:1.24; --bgbri:1.00;
+  --facex:75%; --facey:30%; --facerx:15%; --facery:19%; --facecore:55%;
+  --faceblur:.28; --faceboost:.24; --facecon:1.18;
+}
+.theme-ex .widget{ position:relative }
+.theme-ex .ex-bg i, .theme-ex .ex-bg b{
+  position:absolute; z-index:0; top:var(--bgtop); right:var(--bgx);
+  height:var(--bgh); width:auto; aspect-ratio:var(--bgar);
+  background-image:var(--bgimg); background-size:contain;
+  background-repeat:no-repeat; background-position:right top;
+}
+.theme-ex .ex-bg i{
+  filter:blur(var(--bgblur)) saturate(var(--bgsat)) brightness(var(--bgbri));
+  opacity:var(--bgop);
+}
+.theme-ex .ex-bg b{
+  filter:blur(calc(var(--bgblur) * var(--faceblur))) saturate(var(--bgsat))
+         brightness(var(--bgbri)) contrast(var(--facecon));
+  opacity:calc(var(--bgop) + var(--faceboost));
+  -webkit-mask-image:radial-gradient(ellipse var(--facerx) var(--facery)
+    at var(--facex) var(--facey), #000 var(--facecore), transparent 100%);
+  mask-image:radial-gradient(ellipse var(--facerx) var(--facery)
+    at var(--facex) var(--facey), #000 var(--facecore), transparent 100%);
+}
+/* 遮罩只压顶栏那一条（那里字小又密），中间和下部让给图。
+   ★ 压到脸上会把脸压平 —— 只剩两个鼻孔、读不出是张脸。 */
+.theme-ex .ex-bg::after{
+  content:''; position:absolute; inset:0; z-index:1;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 62%, transparent) 0%,
+                    color-mix(in srgb, var(--bg) 20%, transparent) 12%, transparent 24%),
+    linear-gradient(0deg, color-mix(in srgb, var(--bg) 58%, transparent) 0%,
+                    transparent 13%);
+}
+/* 内容抬到背景之上。★ 漏了这条会让卡片被 .ex-bg::after（z-index:1）盖住，
+   界面只剩一张大脸 —— 而且不报错。 */
+.theme-ex .widget > *:not(.ex-bg){ position:relative; z-index:3 }
+
+/* 背景模式下的"让路"规则：卡片/顶栏/数据源条各自不透明时，
+   背景图会**明明在、但看不见**。这几条就是让它们透出来。 */
+.theme-ex .card{
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 58%), transparent);
+  border-top-color:transparent;
+  border-right-color:color-mix(in srgb, var(--line) 70%, transparent);
+  border-bottom-color:color-mix(in srgb, var(--line) 70%, transparent);
+  backdrop-filter:blur(4px);
+}
+.theme-ex .bar{
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 24%), transparent);
+  backdrop-filter:blur(5px);
+}
+/* ★ 数据源条原本是**完全不透明**的 —— 18px 高的一堵墙，正好把脸挡掉。
+   放宽到 55%：它只有 10px 小字，读得清；信息一个字没动，仍是审计凭据。 */
+.theme-ex .srcbar{
+  background:color-mix(in srgb, var(--surface-2) calc(var(--bg-alpha,1) * 55%), transparent);
+}
+.theme-ex .ghead:hover{ background:color-mix(in srgb, var(--surface-2) 45%, transparent) }
+/* 底部净空：不留这条，最后一张卡片正好压在脸上，"大图"永远只露半张 */
+.theme-ex .cols2{ padding-bottom:calc(26px * var(--scale, 1)) }
+
+/* ---------------------------------------------------------- 整个前端透明度
+   ★ 面板里那个「透明度」调的是**整个前端**（连文字一起透），
+     不是只把背景色调淡 —— 后者几乎看不出来，用户报过"调了基本无效"。
+     实现放在 html 上，这样挂件外框的边框与圆角也一起参与。 */
+html{ opacity:var(--win-alpha, 1) }

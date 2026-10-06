@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务挂件 · 原型工作台</title>
+<link rel="stylesheet" href="widget.css">
+<style>
+/* 工作台自身的样式（不属于挂件） */
+body{
+  margin:0; padding:20px 24px 60px; background:#010409; color:#e6edf3;
+  font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+}
+h1{font-size:17px;font-weight:600;margin:0 0 6px}
+.lead{color:#9198a1;font-size:12.5px;margin:0 0 14px;max-width:920px}
+.panel{
+  padding:10px 13px;background:#161b22;border:1px solid #30363d;
+  border-radius:8px;margin-bottom:18px;display:flex;flex-direction:column;gap:9px;
+}
+.line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.lab{color:#6e7681;font-size:11.5px;min-width:52px}
+.seg{display:flex;gap:4px}
+.seg button, .panel button{
+  font:inherit;font-size:12px;padding:4px 11px;border-radius:6px;
+  background:#1c2128;color:#9198a1;border:1px solid #30363d;cursor:pointer;
+}
+.seg button.on{background:#4493f8;border-color:#4493f8;color:#fff}
+.panel button.on{background:#3fb950;border-color:#3fb950;color:#04180a;font-weight:600}
+input[type=range]{width:190px;accent-color:#4493f8}
+.val{font-size:11.5px;color:#e6edf3;font-variant-numeric:tabular-nums;min-width:110px}
+.stat{font-size:11.5px;color:#9198a1;margin-left:auto}
+.stat b{color:#e6edf3}
+.stat .live{color:#3fb950}
+.stat .demo{color:#4493f8}
+.stat .sample{color:#d29922}
+
+.cols{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+.col{width:var(--colw,320px);flex:0 0 auto}
+.chead{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.cname{font-size:13px;font-weight:600}
+.ctag{font-size:10.5px;padding:1px 6px;border-radius:4px;
+      background:#1c2128;border:1px solid #30363d;color:#9198a1}
+.cdesc2{font-size:11.5px;color:#6e7681;margin:0 0 9px;line-height:1.5}
+.mount{min-height:60px}
+/* 透明预览需要棋盘底，否则看不出"透" */
+.checker{
+  background-image:linear-gradient(45deg,#1a1f26 25%,transparent 25%),
+                   linear-gradient(-45deg,#1a1f26 25%,transparent 25%),
+                   linear-gradient(45deg,transparent 75%,#1a1f26 75%),
+                   linear-gradient(-45deg,transparent 75%,#1a1f26 75%);
+  background-size:14px 14px;
+  background-position:0 0,0 7px,7px -7px,-7px 0;
+  border-radius:12px;
+}
+.hint{margin-top:24px;padding:13px 15px;background:#161b22;border:1px solid #30363d;
+      border-radius:8px;font-size:12px;color:#9198a1;max-width:920px}
+.hint b{color:#e6edf3}
+.hint code{background:#1c2128;padding:1px 5px;border-radius:3px;color:#e6edf3;font-size:11.5px}
+.hint ol{margin:7px 0 0;padding-left:19px}
+.hint li{margin:3px 0}
+</style>
+</head>
+<body>
+
+<h1>任务挂件 · 原型工作台</h1>
+<p class="lead">
+  三套布局并排，<b>改 widget.css 一处，三个同时变</b>。
+  尺寸与透明度直接拖滑块 —— 它们就是挂件窗口将来的真实属性。
+</p>
+
+<div class="panel">
+  <div class="line">
+    <span class="lab">状态</span><span class="seg" id="states"></span>
+    <span class="stat" id="stat"></span>
+  </div>
+  <div class="line">
+    <span class="lab">数据</span>
+    <span class="seg" id="scen"></span>
+    <span style="font-size:11.5px;color:#6e7681" id="scennote"></span>
+  </div>
+  <div class="line">
+    <span class="lab">宽度</span>
+    <input type="range" id="rw" min="300" max="760" step="10" value="320">
+    <span class="val" id="vw"></span>
+  </div>
+  <div class="line">
+    <span class="lab">透明度</span>
+    <input type="range" id="ra" min="35" max="100" step="1" value="100">
+    <span class="val" id="va"></span>
+    <span style="font-size:11.5px;color:#6e7681">背景透明，文字保持清晰</span>
+  </div>
+</div>
+
+<div class="cols">
+  <div class="col">
+    <div class="chead"><span class="cname">A · 紧凑型</span><span class="ctag">信息密度优先</span></div>
+    <p class="cdesc2">一屏尽量多。任务多、想扫一眼全貌时用。</p>
+    <div class="mount checker" id="m-a"></div>
+  </div>
+  <div class="col">
+    <div class="chead"><span class="cname">B · 宽松型</span><span class="ctag">可读性优先</span></div>
+    <p class="cdesc2">字号 +1.5px、留白加大。任务少、更在意看清每一条。</p>
+    <div class="mount checker" id="m-b"></div>
+  </div>
+  <div class="col">
+    <div class="chead"><span class="cname">C · 卡住优先</span><span class="ctag">按紧急度重排</span></div>
+    <p class="cdesc2">把「卡住了」抽成独立分区置顶 —— 它才是唯一需要你动手的。</p>
+    <div class="mount checker" id="m-c"></div>
+  </div>
+</div>
+
+<div class="hint">
+  <b>怎么迭代</b>
+  <ol>
+    <li>改 <code>widget.css</code>（配色/间距/字号都在 :root 变量里）→ 刷新浏览器</li>
+    <li>改 <code>widget.js</code>（渲染逻辑）→ 刷新浏览器</li>
+    <li>数据变了：跑 <code>python refresh-data.py</code> → 刷新浏览器</li>
+    <li>连不上看板时自动用内置样例数据，界面照样完整，<b>不会白屏</b></li>
+  </ol>
+  <p style="margin:9px 0 0">
+    <b>尺寸与透明度的实现口径</b>：宽度写在挂件根元素的 <code>--w</code>，
+    字号系数 <code>--scale = (w/320)^0.45</code>（<b>开平方根而非等比</b> ——
+    等比的话 760px 时字号到 28px，满屏是字、信息反而更少），
+    透明度 <code>--bg-alpha</code> 只作用于背景与卡片面，<b>文字保持不透明</b>；
+    宽度 ≥470px 自动并排两列：<b>放大的收益落在"看得更多"而不是"字更大"</b>。
+  </p>
+  <p style="margin:9px 0 0">
+    <b>改样式时请保留</b>：配色只用 :root 变量（要和看板同源）；语义色不可改
+    （停滞=warn、完成=ok、失败=bad、进行中=accent）。
+  </p>
+</div>
+
+<!-- 数据场景：hash 决定加载哪一份，切换即 reload（最简单可靠） -->
+<script>
+(function () {
+  var h = location.hash;
+  var f = h.indexOf('cover') >= 0 ? 'data-cover.js'
+        : h.indexOf('demo')  >= 0 ? 'data-dev.js'
+        : 'data.js';
+  document.write('<script src="' + f + '"><\/script>');
+})();
+</script>
+<script src="widget.js"></script>
+<script>
+var META = window.WB_WIDGET_META;
+
+/** ISO 串 → 本地时间 HH:MM:SS。
+ *  这里原来写的是 `m.fetchedAt.slice(11, 19) + ' UTC'` —— ISO 串的时间部分
+ *  本来就是 UTC，再直接切片等于把 UTC 当本地时间显示（东八区差 8 小时）。
+ *  统一走这个函数，别再切字符串。 */
+function localTime(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var p = function (n) { return (n < 10 ? '0' : '') + n; };
+  return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+var STATES = [
+  ['expanded',    '展开'],
+  ['detail',      '详情'],
+  ['mini',        '收起'],
+  ['empty',       '空'],
+  ['unreachable', '连不上']
+];
+var cur = 'expanded';
+var width = 320, alpha = 1;
+var themeOf = { 'm-a': 'theme-a', 'm-b': 'theme-b', 'm-c': 'theme-c' };
+var picked = null;
+
+(function pickDefault() {
+  var d = window.WB_DATA || {}, b = d.board || {};
+  var st = b.stalled_ids || [];
+  // 详情态默认挑「卡住」的第一个 —— 那是最该被看的
+  if (st.length) { picked = st[0]; return; }
+  var by = b.tasks_by_column || {};
+  Object.keys(by).some(function (k) {
+    if (by[k].length) { picked = by[k][0].id; return true; }
+  });
+})();
+
+function draw() {
+  document.querySelectorAll('#states button').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.s === cur);
+  });
+  Object.keys(themeOf).forEach(function (id) {
+    window.renderWidget(document.getElementById(id), cur, {
+      theme: themeOf[id], width: width, alpha: alpha,
+      taskId: cur === 'detail' ? picked : null,
+      onOpenTask: function (tid) { picked = tid; cur = 'detail'; draw(); }
+    });
+  });
+  // 列宽跟着走，工作台才能如实反映"挂件有多宽"
+  document.querySelectorAll('.col').forEach(function (c) {
+    c.style.setProperty('--colw', width + 'px');
+  });
+  var sc = META.scaleFor(width);
+  document.getElementById('vw').textContent =
+    width + 'px · 字号 ×' + sc.toFixed(2) + (width >= META.W_WIDE ? ' · 两列' : '');
+  document.getElementById('va').textContent = Math.round(alpha * 100) + '%';
+}
+
+(function init() {
+  var box = document.getElementById('states');
+  STATES.forEach(function (s) {
+    var b = document.createElement('button');
+    b.textContent = s[1]; b.dataset.s = s[0];
+    b.onclick = function () { cur = s[0]; draw(); };
+    box.appendChild(b);
+  });
+
+  // 数据场景
+  var h = location.hash;
+  var curScen = h.indexOf('cover') >= 0 ? 'cover'
+              : h.indexOf('demo')  >= 0 ? 'demo' : 'live';
+  var scen = document.getElementById('scen');
+  [['真实看板', 'live', '#live'],
+   ['代码开发示例', 'demo', '#demo'],
+   ['多种任务形态', 'cover', '#cover']].forEach(function (o) {
+    var b = document.createElement('button');
+    b.textContent = o[0];
+    b.className = (curScen === o[1]) ? 'on' : '';
+    b.onclick = function () { location.hash = o[2]; location.reload(); };
+    scen.appendChild(b);
+  });
+  document.getElementById('scennote').textContent =
+      curScen === 'live'  ? '— 从 127.0.0.1:8791 拉取的真实数据'
+    : curScen === 'demo'  ? '— 演示用：开发类项目的形态（含新字段）'
+    :                       '— 演示用：8 种任务形态，只用五要素、不加任何字段';
+
+  var m = window.WB_META || {};
+  var cls = m.source === 'live' ? 'live' : (m.source === 'demo' ? 'demo' : 'sample');
+  var txt = m.source === 'live' ? '● 实时看板'
+          : (m.source === 'demo' ? '● 代码开发示例' : '● 样例数据');
+  document.getElementById('stat').innerHTML =
+    '数据源 <b class="' + cls + '">' + txt + '</b> · 任务 <b>' + m.total
+    + '</b> 个 · 卡住 <b>' + m.stalled + '</b> 个'
+    + (m.fetchedAt ? ' · 取于 <b>' + localTime(m.fetchedAt) + '</b>' : '');
+
+  var rw = document.getElementById('rw'), ra = document.getElementById('ra');
+  rw.oninput = function () { width = +rw.value; draw(); };
+  ra.oninput = function () { alpha = +ra.value / 100; draw(); };
+  draw();
+})();
+</script>
+</body>
+</html>

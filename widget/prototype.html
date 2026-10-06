@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务挂件 · 界面原型</title>
+<style>
+/* ============================================================
+   任务挂件界面原型
+   ------------------------------------------------------------
+   设计原则：内容优先。目标只有一个 —— 不打开浏览器就能看清
+   「有哪些任务、各自到哪了、哪个卡住了」。
+
+   配色直接复用看板的 dark token（web/style.css 的 [data-theme=dark]），
+   所以挂件和看板是同一套视觉，不是"相去甚远"的两套皮肤。
+
+   克制项（刻意不做）：无动画、无渐变、无多重阴影、无装饰图形。
+   信息层级只靠 字号/字重/颜色/间距 建立。
+   ============================================================ */
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128;
+  --line:#30363d; --line-soft:#21262d;
+  --fg:#e6edf3; --fg-2:#9198a1; --fg-3:#6e7681;
+  --accent:#4493f8; --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+  --radius:8px; --radius-lg:12px;
+  --w:320px;                     /* 挂件实际宽度；原型按 1:1 呈现 */
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:28px 24px 40px;
+  background:#010409; color:var(--fg);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+}
+h1{font-size:17px; font-weight:600; margin:0 0 6px}
+.lead{color:var(--fg-2); font-size:12.5px; margin:0 0 4px; max-width:760px}
+.lead b{color:var(--fg); font-weight:600}
+.note{color:var(--fg-3); font-size:12px; margin:14px 0 26px}
+.row{display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start}
+.cell{width:var(--w)}
+.cap{font-size:12px; color:var(--fg-2); margin:0 0 9px; display:flex; gap:7px; align-items:baseline}
+.cap .n{display:inline-block; min-width:17px; height:17px; line-height:17px; text-align:center;
+        background:var(--surface-2); border:1px solid var(--line); border-radius:4px;
+        font-size:11px; color:var(--fg-2)}
+.cap em{font-style:normal; color:var(--fg-3); font-size:11.5px}
+
+/* ---------------------------------------------------------- 挂件外框 */
+.widget{
+  width:var(--w); background:var(--bg);
+  border:1px solid var(--line); border-radius:var(--radius-lg);
+  overflow:hidden; display:flex; flex-direction:column;
+  /* 挂件是常驻窗口：给一个固定高度上限，内部滚动 */
+  max-height:460px;
+}
+.widget.mini{max-height:none}
+
+/* ---------------------------------------------------------- 顶栏 */
+.bar{
+  display:flex; align-items:center; gap:9px;
+  padding:9px 11px; background:var(--surface);
+  border-bottom:1px solid var(--line); flex:0 0 auto;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.dot.bad{background:var(--bad)}
+.ttl{font-size:12.5px; font-weight:600; flex:1; white-space:nowrap;
+     overflow:hidden; text-overflow:ellipsis}
+.pill{font-size:11px; padding:1.5px 7px; border-radius:999px;
+      background:var(--surface-2); border:1px solid var(--line); color:var(--fg-2);
+      white-space:nowrap; font-variant-numeric:tabular-nums}
+.pill.alert{color:var(--warn); border-color:#5a4200;
+            background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.icobtn{width:22px;height:22px;border:1px solid transparent;border-radius:6px;
+        background:transparent;color:var(--fg-3);cursor:pointer;font-size:12px;
+        display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.icobtn:hover{border-color:var(--line);color:var(--fg)}
+
+/* ---------------------------------------------------------- 完成率条 */
+.rate{height:3px;background:var(--surface-2);flex:0 0 auto}
+.rate i{display:block;height:100%;background:var(--accent)}
+
+/* ---------------------------------------------------------- 列组 */
+.grp{flex:0 0 auto}
+.grp + .grp{border-top:1px solid var(--line-soft)}
+.ghead{
+  display:flex;align-items:center;gap:7px;padding:7px 11px;
+  cursor:pointer;user-select:none;
+}
+.ghead:hover{background:var(--surface)}
+.cbar{width:3px;height:12px;border-radius:2px;background:var(--fg-3);flex:0 0 auto}
+.gtitle{font-size:12px;font-weight:600;flex:1}
+.gcount{font-size:11px;color:var(--fg-3);font-variant-numeric:tabular-nums}
+.gwip{font-size:10.5px;color:var(--warn)}
+.chev{font-size:9px;color:var(--fg-3);transition:none}
+
+/* ---------------------------------------------------------- 任务卡片 */
+.cards{padding:0 8px 8px}
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-left:3px solid var(--fg-3); border-radius:var(--radius);
+  padding:8px 10px; margin-bottom:6px; cursor:pointer;
+}
+.card:hover{border-color:var(--accent);border-left-color:var(--accent)}
+.card:last-child{margin-bottom:0}
+/* 停滞：左侧橙条 + 底部橙提示。这是最贵的一种"看不见" */
+.card.stall{border-left-color:var(--warn)}
+.card.done{border-left-color:var(--ok);opacity:.72}
+.ctitle{font-size:12.5px;font-weight:500;line-height:1.4;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cdesc{font-size:11.5px;color:var(--fg-3);margin-top:3px;
+       display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+
+/* 进度条：颜色用 warn（"在动"）而不是 accent（"完成率"），两者必须能一眼区分 */
+.pwrap{margin-top:6px}
+.pbar{height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--warn);border-radius:2px}
+.pbar.ok i{background:var(--ok)}
+.pmeta{display:flex;gap:6px;align-items:baseline;margin-top:3px;
+       font-size:10.5px;color:var(--fg-3);font-variant-numeric:tabular-nums}
+.pmeta .pc{color:var(--fg-2);font-weight:600}
+.pmeta .pnum{margin-right:auto}
+.pmeta .pmsg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52%}
+
+.stallmsg{margin-top:5px;padding:2.5px 6px;border-radius:4px;font-size:10.5px;
+          color:var(--warn);background:color-mix(in srgb,var(--warn) 11%,transparent)}
+.cmeta{display:flex;gap:6px;align-items:center;margin-top:6px;
+       font-size:10.5px;color:var(--fg-3);flex-wrap:wrap}
+.tag{background:var(--surface-2);border:1px solid var(--line-soft);
+     border-radius:4px;padding:0 4px;color:var(--fg-2)}
+.prio{color:var(--bad);font-weight:600}
+.el{font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+
+/* ---------------------------------------------------------- 详情视图 */
+.dhead{display:flex;align-items:center;gap:8px;padding:9px 11px;
+       background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto}
+.dtitle{font-size:12.5px;font-weight:600;flex:1;line-height:1.35}
+.dbody{padding:10px 11px;overflow-y:auto}
+.kv{display:grid;grid-template-columns:52px 1fr;gap:5px 9px;font-size:11.5px}
+.kv .k{color:var(--fg-3)}
+.kv .v{color:var(--fg);word-break:break-word}
+.sect{margin-top:11px;padding-top:9px;border-top:1px solid var(--line-soft)}
+.sect .h{font-size:11px;color:var(--fg-3);margin-bottom:5px}
+.ev{display:flex;gap:7px;font-size:11px;padding:2.5px 0;
+    border-bottom:1px solid var(--line-soft)}
+.ev:last-child{border-bottom:0}
+.ev .t{color:var(--fg-3);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ev .k2{color:var(--accent);flex:0 0 auto;min-width:52px}
+.ev .d{color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------------------------------------------------------- 收起态 */
+.minibar{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--surface);cursor:pointer;
+}
+.mini .txt{font-size:12px;flex:1}
+.mini .txt .num{font-weight:600;font-variant-numeric:tabular-nums}
+.mini .txt .alert{color:var(--warn)}
+
+/* ---------------------------------------------------------- 服务不可达 */
+.err{padding:16px 13px;text-align:center}
+.err .e1{font-size:12.5px;color:var(--bad);margin-bottom:5px}
+.err .e2{font-size:11.5px;color:var(--fg-3);margin-bottom:11px;line-height:1.5}
+.btn{font:inherit;font-size:11.5px;padding:4px 11px;border-radius:6px;
+     background:var(--surface-2);color:var(--fg);border:1px solid var(--line);cursor:pointer}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---------------------------------------------------------- 切态（仅原型用） */
+.switch{display:flex;gap:6px;margin:0 0 20px}
+.switch button{font:inherit;font-size:12px;padding:5px 12px;border-radius:6px;
+  background:var(--surface);color:var(--fg-2);border:1px solid var(--line);cursor:pointer}
+.switch button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<h1>任务挂件 · 界面原型</h1>
+<p class="lead">
+  目标：<b>不打开浏览器就能看清「有哪些任务、各自到哪了、哪个卡住了」</b>。
+  配色复用看板的 dark token，视觉与看板同源。
+</p>
+<p class="note">
+  克制的部分也说清楚：无动画、无渐变、无多重阴影、无装饰图形。
+  信息层级只靠字号 / 字重 / 颜色 / 间距建立 —— 这是「以内容为主」的具体落法。
+  挂件实际宽 320px，下面按 1:1 呈现。
+</p>
+
+<div class="switch">
+  <button id="b1" class="on" onclick="go(1)">展开态</button>
+  <button id="b2" onclick="go(2)">详情态</button>
+  <button id="b3" onclick="go(3)">收起态</button>
+  <button id="b4" onclick="go(4)">服务不可达</button>
+</div>
+
+<div class="row">
+
+<!-- ============================================ ① 展开态：一屏看全 -->
+<div class="cell" id="v1">
+  <p class="cap"><span class="n">1</span>展开态 <em>— 有任务时的默认形态。一屏看全</em></p>
+  <div class="widget">
+
+    <div class="bar">
+      <span class="dot"></span>
+      <span class="ttl">WorkBuddy Board</span>
+      <span class="pill alert">1 个卡住</span>
+      <span class="icobtn" title="在浏览器打开完整看板">↗</span>
+      <span class="icobtn" title="收起">—</span>
+    </div>
+    <div class="rate"><i style="width:14%"></i></div>
+
+    <!-- 进行中 -->
+    <div class="grp">
+      <div class="ghead" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <span class="chev">▼</span><span class="cbar" style="background:#4493f8"></span>
+        <span class="gtitle">进行中</span><span class="gcount">1</span>
+        <span class="gwip">WIP 1/5</span>
+      </div>
+      <div class="cards">
+        <div class="card stall" onclick="go(2)">
+          <div class="ctitle">下载「马铃薯男爵」双UP全部视频</div>
+          <div class="pwrap">
+            <div class="pbar"><i style="width:42%"></i></div>
+            <div class="pmeta">
+              <span class="pc">42%</span><span class="pnum">37/88</span>
+              <span class="pmsg">马铃薯男爵的画廊 37/88 · 0 失败</span>
+            </div>
+          </div>
+          <div class="stallmsg">⚠ 已 85 分钟无进展</div>
+          <div class="cmeta">
+            <span class="prio">P10</span>
+            <span class="tag">acfun</span><span class="tag">nas</span>
+            <span class="spacer"></span><span class="el">2小时18分</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 待办 -->
+    <div class="grp">
+      <div class="ghead" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <span class="chev">▼</span><span class="cbar" style="background:#9198a1"></span>
+        <span class="gtitle">待办</span><span class="gcount">2</span>
+      </div>
+      <div class="cards">
+        <div class="card stall">
+          <div class="ctitle">下载「嘻咦啊看」(UID 11842903) 全部视频</div>
+          <div class="cdesc">抓到 61 个，页面报 totalCount=70。存在 9~12 个缺口待补齐</div>
+          <div class="stallmsg">⚠ 已 92 分钟无进展</div>
+          <div class="cmeta">
+            <span class="prio">P5</span><span class="tag">acfun</span>
+            <span class="spacer"></span><span class="el">1小时32分</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ctitle">下载「猎影娘」(UID 6499746) 全部视频</div>
+          <div class="cmeta">
+            <span class="prio">P5</span><span class="tag">acfun</span>
+            <span class="spacer"></span><span class="el">1小时32分</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空列：折叠成一行，不占地方 -->
+    <div class="grp">
+      <div class="ghead" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <span class="chev">▶</span><span class="cbar" style="background:#f85149"></span>
+        <span class="gtitle" style="color:var(--fg-3)">阻塞</span><span class="gcount">0</span>
+      </div>
+      <div class="cards hidden"></div>
+    </div>
+    <div class="grp">
+      <div class="ghead" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <span class="chev">▶</span><span class="cbar" style="background:#3fb950"></span>
+        <span class="gtitle" style="color:var(--fg-3)">已完成</span><span class="gcount">0</span>
+      </div>
+      <div class="cards hidden"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================ ② 详情态：展开看每一步 -->
+<div class="cell hidden" id="v2">
+  <p class="cap"><span class="n">2</span>详情态 <em>— 点卡片进来。这是「展开节点看每一步」的落法</em></p>
+  <div class="widget">
+    <div class="bar">
+      <span class="icobtn" onclick="go(1)" title="返回">←</span>
+      <span class="ttl">任务详情</span>
+      <span class="icobtn" onclick="go(1)">×</span>
+    </div>
+    <div class="dbody">
+      <div class="dtitle" style="margin-bottom:9px">下载「马铃薯男爵」双UP全部视频</div>
+      <div class="kv">
+        <div class="k">所在列</div><div class="v">进行中</div>
+        <div class="k">进度</div>
+        <div class="v">
+          <div class="pbar"><i style="width:42%"></i></div>
+          <div class="pmeta"><span class="pc">42%</span>
+            <span class="pnum">37/88</span></div>
+        </div>
+        <div class="k">说明</div>
+        <div class="v">UID 8222737 的画廊(72) + UID 55635763 的放映厅(16)，共 88 个视频</div>
+        <div class="k">标签</div><div class="v"><span class="tag">acfun</span> <span class="tag">nas</span> <span class="tag">download</span></div>
+        <div class="k">优先级</div><div class="v"><span class="prio">P10</span></div>
+        <div class="k">创建于</div><div class="v">10-05 14:53（1 小时 48 分前）</div>
+        <div class="k">耗时</div><div class="v">2 小时 18 分</div>
+      </div>
+
+      <div class="sect">
+        <div class="h">变更流水 · 6 条</div>
+        <div class="ev"><span class="t">16:01:12</span><span class="k2">advance</span><span class="d">→ 37/88</span></div>
+        <div class="ev"><span class="t">15:58:40</span><span class="k2">advance</span><span class="d">→ 30/88</span></div>
+        <div class="ev"><span class="t">15:44:03</span><span class="k2">update</span><span class="d">进度 {current:30}</span></div>
+        <div class="ev"><span class="t">15:20:17</span><span class="k2">move</span><span class="d">待办 → 进行中</span></div>
+        <div class="ev"><span class="t">14:53:58</span><span class="k2">create</span><span class="d">进入 待办</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ ③ 收起态 -->
+<div class="cell hidden" id="v3">
+  <p class="cap"><span class="n">3</span>收起态 <em>— 无任务时自动缩成这样，不是消失</em></p>
+  <div class="widget mini">
+    <div class="rate"><i style="width:14%"></i></div>
+    <div class="minibar">
+      <span class="dot"></span>
+      <span class="txt"><span class="num">3</span> 个任务 · <span class="alert">1 个卡住</span></span>
+      <span class="icobtn" title="展开">▴</span>
+    </div>
+  </div>
+  <p class="note" style="margin:14px 0 0; font-size:11.5px">
+    <b>为什么缩成条而不是隐藏</b>：隐藏了你找不到它，然后会以为"挂件没跑"。
+    小条始终可见，还顺手把「几个任务 / 几个卡住」摆在最外层。
+  </p>
+</div>
+
+<!-- ============================================ ④ 服务不可达 -->
+<div class="cell hidden" id="v4">
+  <p class="cap"><span class="n">4</span>服务不可达 <em>— 一等状态，不是空白</em></p>
+  <div class="widget mini">
+    <div class="bar">
+      <span class="dot bad"></span>
+      <span class="ttl">WorkBuddy Board</span>
+      <span class="icobtn">—</span>
+    </div>
+    <div class="err">
+      <div class="e1">看板服务未启动</div>
+      <div class="e2">挂件连不上 <code>127.0.0.1:8791</code><br>数据仍安全存在磁盘上</div>
+      <button class="btn">启动看板服务</button>
+    </div>
+  </div>
+  <p class="note" style="margin:14px 0 0; font-size:11.5px">
+    <b>为什么显式做这个态</b>：挂件最容易翻车的不是显示错，而是<b>空白</b> ——
+    空白让人分不清"没任务"和"连不上"。这两个态必须长得完全不一样。
+  </p>
+</div>
+
+</div>
+
+<script>
+function go(n){
+  for(var i=1;i<=4;i++){
+    document.getElementById('v'+i).classList.toggle('hidden', i!==n);
+    document.getElementById('b'+i).classList.toggle('on', i===n);
+  }
+}
+</script>
+</body>
+</html>

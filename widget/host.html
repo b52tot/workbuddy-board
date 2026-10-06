@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务挂件</title>
+<link rel="stylesheet" href="widget.css">
+<style>
+/* ============================================================
+   宿主页面：给挂件提供窗口外壳
+   ------------------------------------------------------------
+   与判据有关的两点，写在最前面：
+
+   1) 拖拽区只标在**标题和底栏**上，不标整窗 ——
+      整窗可拖会把「点卡片」当成「拖窗口」，详情页永远打不开，
+      而且不报错，只表现为"点了没反应"。
+
+   2) 「连不上」和「没有任务」必须是两个不同的视图。
+      挂件最常见的翻车不是显示错，而是**空白** ——
+      空白让人分不清是没数据还是服务挂了。
+
+   挂件本体样式全部来自 ../widget.css，宿主的 CSS 只做外围。
+   ============================================================ */
+html,body{
+  margin:0;height:100%;background:transparent;overflow:hidden;
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  color:var(--fg);user-select:none;
+}
+body{display:flex;flex-direction:column}
+
+#app{flex:1;overflow-y:auto;overflow-x:hidden}
+#app::-webkit-scrollbar{width:8px}
+#app::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+#app::-webkit-scrollbar-track{background:transparent}
+/* 挂件在宿主里去掉自身圆角与外边距：窗口已经是圆角的了 */
+#app .widget{
+  border-radius:12px;max-height:none!important;
+  border-color:var(--line);
+}
+
+/* MCP 注册引导条。
+   放在数据源条下面（不挡顶栏、不挡第一张卡）。配色走 warn 那一档 ——
+   它不是错误，是"有一件事还没做"，所以用琥珀而不是红。 */
+.mcpguide{
+  margin:0 8px 6px; padding:9px 11px; border-radius:8px;
+  background:color-mix(in srgb, var(--warn, #d29922) 13%, transparent);
+  border:1px solid color-mix(in srgb, var(--warn, #d29922) 42%, transparent);
+}
+.mcpguide.done{
+  background:color-mix(in srgb, var(--ok, #3fb950) 12%, transparent);
+  border-color:color-mix(in srgb, var(--ok, #3fb950) 38%, transparent);
+}
+.mcpguide .mg-h{font-size:12px; font-weight:600; color:var(--fg); margin-bottom:3px}
+.mcpguide .mg-b{font-size:11px; line-height:1.55; color:var(--fg-2)}
+.mcpguide .mg-b b{color:var(--fg)}
+.mcpguide .mg-a{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
+.mcpguide button{
+  font:inherit; font-size:11px; padding:3px 11px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--line, #30363d);
+  background:color-mix(in srgb, var(--surface-2, #1c2128) 85%, transparent);
+  color:var(--fg-2);
+}
+.mcpguide button.mg-go{
+  background:var(--warn, #d29922); border-color:var(--warn, #d29922);
+  color:#16130a; font-weight:600;
+}
+.mcpguide button.mg-go:disabled{opacity:.6; cursor:default}
+.mcpguide.done button.mg-go{background:var(--ok, #3fb950); border-color:var(--ok, #3fb950)}
+
+/* 拖拽区：只标标题，不标按钮 */
+.drag-area{cursor:default}
+
+/* Windows 风格的窗口键：右上角那两颗。
+   关闭键悬停变红（e81123 是 Windows 的关闭红）—— 这是 Windows 用户
+   "能一眼认出这是关闭"的唯一线索，缺了它就只是两个符号。 */
+.winbtn{font-size:14px; line-height:1; padding:2px 7px; border-radius:6px}
+.winbtn-close:hover{
+  background:#e81123 !important; color:#fff !important; border-color:#e81123 !important;
+}
+
+/* ---------------------------------------------------------- 底部操作条 */
+/* ★ 底栏一律用主题变量。原来这里写死了 #161b22 / #6e7681 / #30363d / #4493f8 ——
+   于是"换主题只有中间变了、底下一成不变"。 */
+#foot{
+  flex:0 0 auto;display:flex;align-items:center;gap:6px;
+  padding:3px 8px 4px;
+  background:color-mix(in srgb, var(--surface) calc(var(--bg-alpha,1) * 100%),transparent);
+  border-top:1px solid color-mix(in srgb, var(--line-soft) calc(var(--bg-alpha,1) * 100% + 10%),transparent);
+  border-radius:0 0 12px 12px;
+}
+#foot .fstat{flex:1;font-size:10px;color:var(--fg-3);overflow:hidden;
+             text-overflow:ellipsis;white-space:nowrap}
+#foot .fb{
+  width:20px;height:18px;border:1px solid transparent;border-radius:4px;
+  background:transparent;color:var(--fg-3);cursor:pointer;font-size:11px;
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+#foot .fb:hover{border-color:var(--line);color:var(--fg)}
+#foot .fb.on{color:var(--accent)}
+
+/* 缩放柄：无边框窗口没有系统边框可拖，得自己给一个 */
+#grip{
+  position:fixed;right:2px;bottom:2px;width:14px;height:14px;
+  cursor:nwse-resize;z-index:20;
+  background:linear-gradient(135deg,transparent 45%,var(--fg-3) 45%,var(--fg-3) 55%,transparent 55%,
+                             transparent 70%,var(--fg-3) 70%,var(--fg-3) 80%,transparent 80%);
+}
+
+/* ---------------------------------------------------------- 设置面板 */
+/* 设置面板同样一律用主题变量（理由见底栏那条注释） */
+#panel{
+  position:absolute;left:0;right:0;bottom:26px;z-index:30;
+  background:var(--surface);border-top:1px solid var(--line);
+  padding:9px 11px;display:none;flex-direction:column;gap:8px;
+  color:var(--fg-2);
+}
+#panel.show{display:flex}
+#panel .pl{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg-2)}
+#panel .pl .k{min-width:44px;color:var(--fg-3)}
+#panel input[type=range]{flex:1;accent-color:var(--accent);height:16px}
+#panel .v{font-size:11px;color:var(--fg);min-width:78px;font-variant-numeric:tabular-nums}
+#panel .sw{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;color:var(--fg)}
+#panel .sw input{accent-color:var(--accent);cursor:pointer}
+#panel .seg{display:flex;gap:3px;flex-wrap:wrap}
+#panel .seg button{
+  font:inherit;font-size:11px;padding:2px 8px;border-radius:4px;
+  background:var(--surface-2);color:var(--fg-2);border:1px solid var(--line);cursor:pointer;
+}
+/* 选中态用 --on-accent（各主题自己定），否则琥珀底 + 白字读不清 */
+#panel .seg button.on{
+  background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff);
+  font-weight:600;
+}
+
+/* MCP 状态与后续引导。步骤必须**摆出来**而不是只在日志里 ——
+   "注册完了"和"能用上"中间隔着重启与信任两步，不说清楚用户就会以为没接上。 */
+#panel #vmcp{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 状态色也走主题变量：上一版写死 #3fb950/#d29922，浅色主题下白底绿字只有 2.5:1，
+   "已注册"三个字几乎看不见 —— 和底栏是同一类失效。 */
+#panel #vmcp.ok{color:var(--ok)}
+#panel #vmcp.warn{color:var(--warn)}
+#panel #mcpsteps{display:none;margin:2px 0 0 52px;padding:7px 9px;border-radius:6px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--fg-2);font-size:11px;
+  line-height:1.65;white-space:pre-wrap;word-break:break-word}
+#panel #mcpsteps.show{display:block}
+
+/* 启动期：避免白闪 */
+#boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      color:var(--fg-3);font-size:12px;background:var(--bg)}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<div id="foot">
+  <span class="fstat" id="fstat">启动中…</span>
+  <span class="fsign" id="fsign"></span>
+  <!-- 右下角 = **应用动作**：↗ 浏览器打开、⚙ 设置。
+       ✕ 已经挪到右上角（和窗口控制放一起）—— Windows 用户找关闭一律去右上角，
+       摆在右下角是反直觉的，而且和 ⤓ 语义重复。 -->
+  <button class="fb" id="openboard" data-act="board" title="在浏览器打开完整看板">↗</button>
+  <button class="fb" id="gear" title="设置">⚙</button>
+</div>
+
+<div id="panel">
+  <div class="pl"><span class="k">宽度</span>
+    <input type="range" id="rf" min="10" max="18" step="0.5">
+    <span class="v" id="vf"></span>
+  </div>
+  <div class="pl"><span class="k">透明度</span>
+    <input type="range" id="ra" min="25" max="100" step="1">
+    <span class="v" id="va"></span>
+  </div>
+  <div class="pl"><span class="k">置顶</span>
+    <label class="sw"><input type="checkbox" id="rontop"><span>始终在最前</span></label>
+  </div>
+  <!-- 主题取代了原来的「布局」。原来那三档（紧凑/宽松/卡住优先）现在都按紧凑排版，
+       差异只剩配色与背景 —— 那才是用户真要选的东西。名字一字不改。 -->
+  <div class="pl"><span class="k">主题</span>
+    <span class="seg" id="theme">
+      <button data-t="theme-midnight">午夜蓝</button>
+      <button data-t="theme-amber">琥珀石墨</button>
+      <button data-t="theme-ink">亚克力白</button>
+      <button data-t="theme-ex">前妻整容前</button>
+    </span>
+  </div>
+
+  <!-- MCP 注册。挂件是"看"的，MCP 是"记"的 —— agent 能不能把干的活写进看板，
+       全看这一步接没接上。所以不藏，直接摆在设置里，并带后续引导。 -->
+  <div class="pl"><span class="k">MCP</span>
+    <span class="v" id="vmcp" style="min-width:0">读取中…</span>
+    <button class="fb" id="mcpbtn">注册</button>
+  </div>
+  <div id="mcpsteps"></div>
+
+  <!-- 版本戳。不是装饰，是判据：这轮出过"改了没生效"的困惑 ——
+       文件明明换新了，可新功能只在"未注册的首次启动"才出现，
+       界面上又答不出"我跑的是哪一版"，于是被判断成"桌面未更新"。
+       有了这一行，和 dist 的 mtime/体积一对就知道。 -->
+  <div class="pl"><span class="k">版本</span>
+    <span class="v" id="vbuild" style="min-width:0">—</span></div>
+</div>
+
+<div id="grip" title="拖动调整大小"></div>
+<div id="boot">正在读取看板…</div>
+
+<!--@INLINE_WIDGET_JS@-->
+<!--
+  ↑ 这行是**构建期的内联锚点**，别删。
+    make_inline.py 会把它替换成 widget.js 的内联脚本块，生成打包用的
+    host.inline.html（零外部请求）。直接打开本文件（开发态）时它只是注释，
+    什么都不做，widget.js 由下面的动态加载兜住 —— 两种模式都能跑。
+
+    ★ 为什么要有这个锚点、而不是去改下面那段动态加载：
+      动态加载是"宿主先拿到数据、widget.js 才有东西可渲染"的顺序保障，
+      反复调过很多轮才稳定。内联只需**在旁边插一个入口**，不该去动它。
+
+    ★ 注释里不要写出成对的脚本标签字面量（哪怕在 HTML 注释里也不行）：
+      任何按"脚本标签对"做粗匹配的工具都会把注释内容当成代码抓出来，
+      于是"注释里的示例"变成"真实数据"，引发一堆假报错。
+-->
+<script>
+/* ============================================================
+   宿主桥接
+   ============================================================ */
+try { console.log('[host] script start'); } catch (e) {}
+
+/* ★ 全局错误必须显示到界面上。
+ *
+ * 打包版是 windowed（**没有控制台**），console.error 出去的东西
+ * 用户一个字也看不到 —— 于是任何 JS 异常都表现为「窗口空白」或
+ * 「卡在某句话上」，而且完全无从定位。
+ * 这三次实机问题里有两次都是栽在这里：现象有了、原因看不见。
+ */
+function showFatal(title, detail) {
+  try {
+    var _a = api();
+    if (_a && _a.log) _a.log('FATAL: ' + title + ' | ' + String(detail).split(String.fromCharCode(10)).join(' / '));
+  } catch (e) {}
+  try {
+    var el = document.getElementById('app');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="widget mini"><div class="err">'
+      + '<div class="e1">' + String(title).slice(0, 120) + '</div>'
+      + '<div class="e2" style="text-align:left;word-break:break-all">'
+      + String(detail || '').slice(0, 400) + '</div></div></div>';
+    var f = document.getElementById('fstat');
+    if (f) { f.textContent = '出错：' + String(title).slice(0, 60); f.style.color = 'var(--bad)'; }
+    var b = document.getElementById('boot');
+    if (b) b.remove();          // 出错时一定要把遮罩摘掉，否则用户看到的是"一直连接中"
+  } catch (e) { /* 兜底里再出错就没办法了 */ }
+}
+window.onerror = function (msg, src, line, col) {
+  showFatal('脚本错误', msg + '\n' + (src || '').split('/').pop() + ':' + line + ':' + col);
+  return false;
+};
+window.addEventListener('unhandledrejection', function (e) {
+  var r = e.reason;
+  showFatal('异步操作失败', (r && (r.message || r.toString())) || String(r));
+});
+
+var API = null;
+var CFG = { width: 320, height: 470, alpha: 1, theme: 'theme-amber',
+            font: 13, on_top: true };   // font = 字号(px)，取代原来的宽度旋钮
+var CUR_STATE = 'expanded';   // 当前视图（展开/详情/收起/连不上）
+var CUR_TASK = null;          // 详情视图看的是哪个任务
+var TIMER = null;
+var FAILS = 0;
+var SIGN = '';            // 署名（底栏右端）
+var NO_SOURCE = false;    // 没找到现成数据源（首次运行）
+var BOARD_URL = 'http://127.0.0.1:8791';   // 由 get_config() 填
+var ETAG = null;                            // 上次响应的 ETag（条件请求用）
+var SHOW_MCP_GUIDE = false;   // 首次启动且 MCP 未注册 ⇒ 摆出注册引导
+var MCP_GUIDE_DONE = false;   // 刚注册完，换成"还差两步"的提示
+var BOOT_TRACE = [];          // 启动到哪一步了 —— 卡住时这个最有价值
+
+/** 读不到数据时用的一张空看板：结构与正常一致，只是没有任务。 */
+function emptyBoard() {
+  var cols = [
+    { id: 'todo',    title: '待办',   color: 'gray',  is_terminal: 0, wip_limit: null },
+    { id: 'doing',   title: '进行中', color: 'blue',  is_terminal: 0, wip_limit: 5 },
+    { id: 'blocked', title: '阻塞',   color: 'red',   is_terminal: 0, wip_limit: null },
+    { id: 'done',    title: '已完成', color: 'green', is_terminal: 1, wip_limit: null }
+  ];
+  return {
+    title: '任务看板', columns: cols,
+    tasks_by_column: { todo: [], doing: [], blocked: [], done: [] },
+    stats: { total: 0, finished: 0, active: 0, percent: 0, agg_progress: 0,
+             stalled: 0, stall_threshold_sec: 90,
+             per_column: { todo: 0, doing: 0, blocked: 0, done: 0 } },
+    stalled_ids: [], server_seq: 0
+  };
+}
+
+function trace(step) {
+  BOOT_TRACE.push(step);
+  var f = document.getElementById('fstat');
+  if (f && !f.textContent.startsWith('共 ')) f.textContent = '启动中… ' + step;
+  // ★ 上报到宿主的日志文件：打包版没有控制台，页面里的进度只有落盘才看得见
+  try { var a = api(); if (a && a.log) a.log('trace:' + step); } catch (e) {}
+}
+
+function api() { return window.pywebview && window.pywebview.api; }
+
+/** 把 bundle 交给 widget.js 并重绘 */
+function applyBundle(r) {
+  window.WB_RELOAD({
+    _source: 'live',
+    _fetched_at: new Date().toISOString(),
+    board: r.board,
+    events: r.events
+  });
+  draw();
+}
+
+var CUR_STATE = 'expanded';
+var LAST_DRAWN = null;      // 上一帧画的是哪个视图（决定要不要沿用滚动位置）
+
+function draw() {
+  var app = document.getElementById('app');
+  // ★ 保住滚动位置 —— renderWidget 是整块换 innerHTML。
+  //   轮询每 2 秒就会走到这里一次（数据一变就重绘），
+  //   不还原的话用户往下翻「已完成」，每 2 秒被弹回顶端。
+  //   但**只在同一视图内**沿用：从列表进详情、从详情回列表，
+  //   沿用旧的滚动位置会让新页面莫名其妙停在半截。
+  var keepTop = (app && CUR_STATE === LAST_DRAWN) ? app.scrollTop : 0;
+  window.renderWidget(app, CUR_STATE, {
+    theme: CFG.theme, width: CFG.width, alpha: CFG.alpha, font: CFG.font,
+    taskId: CUR_TASK,
+    onOpenTask: function (tid) { CUR_TASK = tid; CUR_STATE = 'detail'; draw(); fitWindow(); },
+    // 「返回」是宿主的视图状态，所以由宿主提供实现；内容层只负责画那个箭头
+    onBack: function () { CUR_TASK = null; CUR_STATE = 'expanded'; draw(); fitWindow(); }
+  });
+  LAST_DRAWN = CUR_STATE;
+  if (app) app.scrollTop = keepTop;
+  // ★ 主题类**同时**挂到 <html> 上。
+  //   widget.js 只把类挂在 #app 上，而底栏 #foot、设置面板 #panel、缩放柄 #grip
+  //   都是 #app 的**兄弟节点** —— 它们拿不到主题变量，于是"底部不跟着换主题"。
+  //   挂到 <html> 之后所有节点都在同一个作用域里。
+  ['theme-midnight', 'theme-amber', 'theme-ink', 'theme-ex']
+    .forEach(function (t) {
+      document.documentElement.classList.toggle(t, t === CFG.theme);
+    });
+  renderMcpGuide(app);
+  markDragArea();
+  bindDrag();
+  setSign();
+  document.documentElement.style.setProperty('--bg-alpha', CFG.alpha);
+}
+
+/* ---------------------------------------------------------- MCP 注册引导
+ *
+ * ★ 为什么要在**首次启动**就摆出来：
+ *   MCP 没接上时，agent 一个任务也记不进来 —— 但界面上**完全看不出来**，
+ *   "空看板"和"没接上"长得一模一样。用户只会觉得"这挂件没用"。
+ *   所以不能等他自己去设置里翻，得在第一次打开时就说清楚。
+ *
+ * ★ 只在列表页出现，且插在数据源条之后（不挡顶栏、不挡第一张卡）。
+ * ★ 按钮一律按 data-act 角色绑，不按位置索引 —— 位置索引在视图切换后会错位
+ *   （踩过：点"返回"结果打开了浏览器）。
+ */
+function renderMcpGuide(app) {
+  if (!app) return;
+  var old = app.querySelector('.mcpguide');
+  if (old) old.remove();
+  if (!SHOW_MCP_GUIDE) return;
+  if (CUR_STATE !== 'expanded') return;      // 详情页/收起态不摆
+
+  var host = app.querySelector('.widget');
+  if (!host) return;
+  var src = host.querySelector('.srcbar');
+  var box = document.createElement('div');
+  box.className = 'mcpguide' + (MCP_GUIDE_DONE ? ' done' : '');
+  if (MCP_GUIDE_DONE) {
+    // 注册完之后，同一个位置换成"接下来还要做两步"的提示
+    box.innerHTML =
+      '<div class="mg-h">✓ 已写入配置，还差两步</div>'
+      + '<div class="mg-b">① 重启 WorkBuddy　② 连接器管理 → 右上角「自定义连接器」'
+      + ' → 找到 <b>board</b> → 点「信任」。做完在新会话里让我调一次 list_tasks 验证。</div>'
+      + '<div class="mg-a"><button class="mg-go" data-act="mcp-dismiss">知道了</button></div>';
+  } else {
+    box.innerHTML =
+      '<div class="mg-h">还没接上 WorkBuddy</div>'
+      + '<div class="mg-b">接上之后 agent 才能把干的活记进这块看板。'
+      + '现在只能看，<b>记不进来</b>。</div>'
+      + '<div class="mg-a">'
+      + '<button class="mg-go" data-act="mcp-install">立即接上</button>'
+      + '<button class="mg-later" data-act="mcp-dismiss">以后再说</button></div>';
+  }
+  if (src && src.nextSibling) host.insertBefore(box, src.nextSibling);
+  else host.appendChild(box);
+
+  // 按角色绑事件（不是按位置）
+  var inst = box.querySelector('[data-act="mcp-install"]');
+  var dism = box.querySelector('[data-act="mcp-dismiss"]');
+  if (inst) {
+    inst.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (!a || !a.install_mcp) return;
+      inst.disabled = true;
+      inst.textContent = '注册中…';
+      a.install_mcp().then(function (r) {
+        if (r && r.ok) {
+          MCP_GUIDE_DONE = true;
+          SHOW_MCP_GUIDE = true;          // 换成"还差两步"的提示，别立刻消失
+          draw(); fitWindow();
+        } else {
+          inst.disabled = false;
+          inst.textContent = '重试';
+          var b = box.querySelector('.mg-b');
+          if (b) b.textContent = '注册失败：' + ((r && r.error) || '未知错误');
+        }
+      }).catch(function (err) {
+        inst.disabled = false;
+        inst.textContent = '重试';
+      });
+    };
+  }
+  if (dism) {
+    dism.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (a && a.dismiss_mcp_guide) a.dismiss_mcp_guide();
+      SHOW_MCP_GUIDE = false;
+      draw(); fitWindow();
+    };
+  }
+}
+
+/** 顶栏拖动。
+ *
+ * ★ 不用 pywebview 的 easy_drag / draggable：
+ *   前者整窗可拖、会吃掉卡片点击；后者的参数其实是 bool，
+ *   不是"选择器"（我一开始理解错了）。所以自己实现，
+ *   由 JS 采集位移、通过 IPC 下发，最可控。
+ *
+ * 用 rAF 合并位移：mousemove 触发频率很高，
+ * 每次都发 IPC 会卡；攒到下一帧发一次就够顺。
+ */
+var DRAG = { on: false, lx: 0, ly: 0, dx: 0, dy: 0, raf: 0 };
+
+/** 往顶栏补一个「最小化到托盘」按钮。
+ *
+ * widget.js 的顶栏固定只画 ↗ 和 —（它是内容层，不该知道"隐藏窗口"这种宿主能力）。
+ * 所以宿主在这里注入第三个按钮，并沿用同样的 class 保持样式一致。
+ */
+function ensureMinButton(bar) {
+  if (bar.querySelector('.icobtn-min')) return;
+  var btn = document.createElement('button');
+  btn.className = 'icobtn icobtn-min';
+  // ★ 角色标注：宿主自己也要遵守"按角色绑定"的约定，
+  //   否则将来有人再写 btns[N] 又会把它算错位置。
+  btn.setAttribute('data-act', 'tray');
+  btn.title = '最小化到托盘（右键托盘图标可重新显示）';
+  btn.textContent = '⤓';
+  btn.onclick = function (e) {
+    e.stopPropagation();
+    var a = api();
+    if (a && a.hide_to_tray) a.hide_to_tray();
+  };
+  // 插到最后一个按钮之后
+  var last = bar.querySelectorAll('.icobtn');
+  var anchor = last[last.length - 1];
+  if (anchor && anchor.nextSibling) bar.insertBefore(btn, anchor.nextSibling);
+  else bar.appendChild(btn);
+  // 新注入的按钮不能被当成拖动区（bar 本身是 drag-area，会冒泡上来）
+  btn.classList.remove('drag-area');
+}
+
+function flushDrag() {
+  DRAG.raf = 0;
+  if (!DRAG.dx && !DRAG.dy) return;
+  var a = api();
+  if (a && a.move_window) a.move_window(DRAG.dx, DRAG.dy);
+  DRAG.dx = 0; DRAG.dy = 0;
+}
+
+function bindDrag() {
+  var app = document.getElementById('app');
+  var bar = app.querySelector('.widget .bar');
+  if (!bar || bar.__dragBound) return;
+  bar.__dragBound = true;
+
+  bar.addEventListener('mousedown', function (e) {
+    // 按钮自己处理点击，不参与拖动
+    if (e.target.closest && e.target.closest('button, .icobtn, a')) return;
+    DRAG.on = true; DRAG.lx = e.screenX; DRAG.ly = e.screenY;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!DRAG.on) return;
+    DRAG.dx += e.screenX - DRAG.lx;
+    DRAG.dy += e.screenY - DRAG.ly;
+    DRAG.lx = e.screenX; DRAG.ly = e.screenY;
+    if (!DRAG.raf) DRAG.raf = requestAnimationFrame(flushDrag);
+  });
+  document.addEventListener('mouseup', function () {
+    DRAG.on = false;
+    if (DRAG.raf) { cancelAnimationFrame(DRAG.raf); DRAG.raf = 0; }
+    if (DRAG.dx || DRAG.dy) flushDrag();
+    // 拖动结束后记住位置
+    var a = api();
+    if (a && a.save_state) a.save_state({});
+  });
+}
+
+/** 渲染后：标拖拽区 + 按角色把顶栏按钮接上宿主能力。
+ *
+ * ★★ 两条硬规矩，都是被真事故逼出来的：
+ *
+ * ① **按角色绑定，绝不按位置索引。**
+ *    原来写的是 `btns[0].onclick = open_board()`，注释还写着"顶栏按钮共 3 个：
+ *    ↗ 打开看板 · — 收起 · ⤓ 最小化"。这个假设只在列表页成立：
+ *    详情页的顶栏是「← × ⤓」—— btns[0] 正好是**返回键**，
+ *    于是「点返回打开了浏览器」。内容层换个视图，宿主就错绑一个按钮，
+ *    而且**全程不报错**。现在 widget.js 给每个按钮标 data-act，宿主只认角色。
+ *
+ * ② **绑定范围是整个挂件，不是某个容器。**
+ *    之前只在 `.widget .bar` 里找按钮，而**收起态用的是 `.minibar`**（不是 .bar）
+ *    ⇒ 收起态的「▴ 展开」从来没被绑过。用户点「—」收起之后，
+ *    那个 ▴ 是个死按钮 —— **人就被困在 62px 的条形里出不来了**。
+ *    所以这里改成从 #app 里按 data-act 找，与视图用哪个容器无关。
+ */
+function markDragArea() {
+  var app = document.getElementById('app');
+
+  // ---------------------------------------------------------- 按钮（跨视图）
+  var act = function (name) { return app.querySelector('[data-act="' + name + '"]'); };
+
+  var bBoard = act('board');
+  if (bBoard) bBoard.onclick = function (e) { e.stopPropagation(); api().open_board(); };
+
+  var bMini = act('mini');
+  if (bMini) bMini.onclick = function (e) {
+    e.stopPropagation();
+    CUR_STATE = CUR_STATE === 'mini' ? 'expanded' : 'mini';
+    draw(); fitWindow();
+  };
+
+  var bExpand = act('expand');
+  if (bExpand) bExpand.onclick = function (e) {
+    e.stopPropagation();
+    CUR_STATE = 'expanded';
+    draw(); fitWindow();
+  };
+
+  // 右上角的 ✕ = **窗口关闭键**（Windows 惯例）。
+  // ★ 关的是"窗口"不是"进程"：真正 quit() 会 window.destroy()，
+  //   窗口一没就再没有恢复入口（除非托盘还在）。所以这里是隐藏到托盘，
+  //   托盘右键有「退出」。语义和位置都跟 Windows 一致，但不会把人困住。
+  var bClose = act('close');
+  if (bClose) bClose.onclick = function (e) {
+    e.stopPropagation();
+    api().hide_to_tray();
+  };
+
+  // data-back（详情页的 ← / ×）由 widget.js 通过 opts.onBack 处理，
+  // 宿主只要保证它不被当成拖动区（见下面 classList.remove）。
+
+  // ---------------------------------------------------------- 拖动区
+  var bar = app.querySelector('.widget .bar');
+  if (bar) {
+    // 只标标题与状态点 —— 按钮留在外面，否则点按钮会变成拖窗口
+    ['ttl', 'dot'].forEach(function (c) {
+      var el = bar.querySelector('.' + c);
+      if (el) el.classList.add('drag-area');
+    });
+    // 顶栏本身也允许拖（但按钮在 DOM 里是后置的，点击时事件目标仍是按钮）
+    bar.classList.add('drag-area');
+    bar.querySelectorAll('button, .icobtn').forEach(function (b) {
+      b.classList.remove('drag-area');
+    });
+    // ★ 不再注入「最小化到托盘」按钮：右上角已经有 ✕（Windows 惯例的关闭键），
+    //   两个按钮做同一件事，用户会以为是两个不同的东西。
+
+  }
+
+  // ★「重试读取」按钮必须在这里绑。
+  //   它是 widget.js（内容层）渲染出来的，宿主不绑就没有任何动作 ——
+  //   表现成"点了没反应"，而且不报错。
+  //
+  //   ★ 这里以前调的是 `api().start_board()`（去拉起一个 HTTP 看板服务），
+  //     那是老架构。现在数据是**进程内直读 sqlite**：没有服务可启动，
+  //     "重试"就是**重新取一次数据**。调 start_board 只会去做一件没用的事。
+  var errBtn = app.querySelector('.err .btn');
+  if (errBtn) {
+    errBtn.onclick = function (e) {
+      e.stopPropagation();
+      errBtn.disabled = true;
+      errBtn.textContent = '正在重试…';
+      FAILS = 0;
+      schedule(60);                     // 立刻重新取一次数据
+      setTimeout(function () {
+        errBtn.disabled = false;
+        errBtn.textContent = '重试读取';
+      }, 1200);
+    };
+  }
+}
+
+/** 窗口高度跟着内容走（收起态要变矮） */
+/** 窗口高度跟着内容走（收起态要变矮）。
+ *
+ * ★★ 这里曾经把「收起」彻底挡死：
+ *      if (CUR_STATE === 'mini') h = 62;
+ *      if (h > 80 && ...) { resize(...) }      // 62 > 80 永远为 false
+ *    结果切到收起态时**窗口尺寸一次都不改**，屏幕上留下一个 62px 的迷你条
+ *    加一大片空白 —— 用户报的"收起功能异常"就是这个。
+ *
+ *    那个 `h > 80` 的门槛本意是防"内容还没渲染出来时把窗口缩没"，
+ *    但它不该管到收起态（收起态的高度是**定值**，跟内容无关）。
+ *    所以改成：收起态直接给定值；只有"按内容算"的那条分支才做下限保护。
+ */
+var MINI_H = 62;          // 收起态窗口高度（定值，不跟内容走）
+
+/** 量出「界面真实需要多高」。
+ *
+ * ★ 为什么不能直接用 `#app.scrollHeight`：
+ *   `#app` 是 `flex:1`，高度被撑满整个可用区。内容比它矮时
+ *   `scrollHeight` 会**被钳到容器高度** ⇒ 量出来的永远是"当前窗口高度"
+ *   ⇒ `fitWindow` 只能把窗口**变大**、永远缩不回来。
+ *   表现就是：用户手动拉高过一次之后，窗口再也回不到贴合内容的高度，
+ *   下面永远留一大片空白（截图里那一大块）。
+ *
+ * 所以这里改成**直接量在文档流里的元素**：`#app` 里挂件本身，
+ * 加上 #app 之外的那几块（数据源条、底栏）。绝对定位的浮层（面板、缩放柄）不算。
+ */
+function contentHeight() {
+  function flowH(el) {
+    var cs = getComputedStyle(el);
+    if (cs.position === 'absolute' || cs.position === 'fixed' || cs.display === 'none') {
+      return 0;
+    }
+    return el.getBoundingClientRect().height
+         + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+  }
+
+  var total = 0, i, el;
+  var app = document.getElementById('app');
+  if (app) {
+    // ★ 量 #app 的**子元素**，不能量 #app 自己 ——
+    //   #app 是 flex:1，它自己的高度就是被拉伸后的容器高度，
+    //   量它等于什么都没改（第一版就是这么写的，被反向验证当场抓出来）。
+    for (i = 0; i < app.children.length; i++) {
+      total += flowH(app.children[i]);
+    }
+    var acs = getComputedStyle(app);
+    total += (parseFloat(acs.paddingTop) || 0) + (parseFloat(acs.paddingBottom) || 0)
+           + (parseFloat(acs.borderTopWidth) || 0) + (parseFloat(acs.borderBottomWidth) || 0);
+  }
+  for (i = 0; i < document.body.children.length; i++) {
+    el = document.body.children[i];
+    if (el.id === 'app' || el.id === 'panel' || el.id === 'grip' || el.id === 'boot') continue;
+    total += flowH(el);
+  }
+  return total;
+}
+
+function fitWindow() {
+  var h;
+  if (CUR_STATE === 'mini') {
+    h = MINI_H;
+  } else {
+    h = Math.min(contentHeight() + 8, 900);
+    // 内容还没渲染（量出来很小）时不要动窗口，
+    // 否则会把窗口缩成一条缝，而且再也长不回来
+    if (h < 80) return;
+  }
+  if (Math.abs(h - CFG.height) > 6) {
+    CFG.height = h;
+    if (api()) api().resize(CFG.width, h);
+  }
+}
+
+function setSign() {
+  var el = document.getElementById('fsign');
+  if (el) el.textContent = SIGN ? ('· ' + SIGN) : '';
+}
+
+function setStat(txt, warn) {
+  var el = document.getElementById('fstat');
+  el.textContent = txt;
+  // 用变量而不是写死：#6e7681 在浅色主题上几乎看不见
+  el.style.color = warn ? 'var(--warn)' : 'var(--fg-3)';
+}
+
+/* ---------------------------------------------------------- 轮询 */
+
+function schedule(ms) {
+  if (TIMER) clearTimeout(TIMER);
+  TIMER = setTimeout(tick, ms);
+}
+
+/** 取一次看板数据。
+ *
+ * ★ 走 IPC 直读数据库（进程内），不是 HTTP。
+ *   原先走 fetch 是因为我误判了病根（以为 IPC 会阻塞主线程）；
+ *   真正的问题是**同进程后台 HTTP 服务被 GIL 饿死**。
+ *   现在数据直接从本地 sqlite 读出来，毫秒级返回：
+ *   没有端口、没有子进程、没有"连接中/连不上"这种中间态。
+ */
+async function fetchBoard() {
+  var a = api();
+  if (!a || !a.get_board) return { ok: false, error: 'no bridge' };
+  var t0 = Date.now();
+  var r = await a.get_board();
+  try {
+    if (a.log) a.log('get_board ' + ((r && r.ok) ? 'OK' : 'FAIL')
+                     + ' in ' + (Date.now() - t0) + 'ms');
+  } catch (e) {}
+  return r || { ok: false, error: 'empty' };
+}
+
+async function tick() {
+  var r;
+  try {
+    trace('fetch');
+    r = await fetchBoard();
+    trace(r && r.ok ? (r.not_modified ? 'ok-304' : 'ok-data') : 'fail');
+  } catch (e) {
+    // fetch 抛异常 = 连不上（DNS/拒连/超时）—— 这是「连不上」而不是「没任务」
+    trace('fetch-err');
+    r = { ok: false, unreachable: true, error: (e && e.name) || 'NetworkError' };
+  }
+
+  try {
+    if (r && r.ok) {
+      FAILS = 0;
+      if (!r.not_modified) {
+        trace('render');
+        applyBundle(r);
+        fitWindow();
+      }
+      var s2 = (r.board && r.board.stats) || {};
+      setStat('共 ' + (s2.total || 0) + ' 个任务'
+              + (s2.stalled ? ' · ' + s2.stalled + ' 个卡住' : ''));
+      // 正常态：展开态 2s；收起态降频到 12s（省流，也因为它不显内容）
+      schedule(CUR_STATE === 'mini' ? 12000 : 2000);
+    } else {
+      FAILS++;
+      // ★ 不再切到「连不上看板服务」那种中间态。
+      //   数据源是本地文件，读不到时给一张**空看板**照样能用，
+      //   底栏说明原因即可 —— 用户要的是"打开就能用"，
+      //   而不是被一个"重试连接"按钮挡住。
+      if (FAILS === 1) {
+        try {
+          window.WB_RELOAD({ _source: 'empty', board: emptyBoard(), events: {} });
+          CUR_STATE = 'expanded';
+          draw();
+        } catch (e) {}
+      }
+      setStat('数据读取失败：' + (r && r.error || '未知'), true);
+      schedule(5000);
+    }
+  } catch (e) {
+    // 渲染阶段出错：把原因摆出来，而不是留一个空白窗口
+    showFatal('渲染失败', ((e && e.stack) || (e && e.message) || String(e)));
+  }
+}
+
+/* ---------------------------------------------------------- 设置 */
+
+function readPanel() {
+  document.getElementById('rf').value = CFG.font;
+  document.getElementById('ra').value = Math.round(CFG.alpha * 100);
+  document.getElementById('vf').textContent = CFG.font + 'px';
+  document.getElementById('va').textContent = Math.round(CFG.alpha * 100) + '%';
+  // 选中哪个主题由按钮自己的 .on 表达。原来还额外写了一个名字标签，
+  // 四个主题名一长就挤，而且和按钮重复。
+  document.querySelectorAll('#theme button').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.t === CFG.theme);
+  });
+  var rt = document.getElementById('rontop');
+  if (rt) rt.checked = !!CFG.on_top;
+}
+
+function bindUI() {
+  var gear = document.getElementById('gear');
+  var panel = document.getElementById('panel');
+  gear.onclick = function () {
+    panel.classList.toggle('show');
+    gear.classList.toggle('on', panel.classList.contains('show'));
+    if (panel.classList.contains('show')) refreshMcp();
+  };
+
+  // ---------------------------------------------------------- MCP 注册
+  /** 刷新 MCP 状态显示。三种状态必须分得清，别糊成"已注册/未注册"两种：
+   *   · 指向本 exe      → 好（别的机器拷 exe 就能用）
+   *   · 指向 Python 脚本 → 能跑，但换机器就断（旧接法）
+   *   · 未注册          → agent 一个任务也记不进来
+   */
+  function refreshMcp() {
+    var el = document.getElementById('vmcp');
+    var a = api();
+    if (!a || !a.mcp_status) { if (el) el.textContent = '宿主不支持'; return; }
+    a.mcp_status().then(function (s) {
+      if (!el) return;
+      el.classList.remove('ok', 'warn');
+      if (!s || s.error) {
+        el.textContent = '读取失败';
+        el.classList.add('warn');
+      } else if (s.installed && s.points_to_exe) {
+        el.textContent = '已接上（指向本程序）';
+        el.classList.add('ok');
+      } else if (s.installed) {
+        el.textContent = '已注册，但指向别处';
+        el.classList.add('warn');
+      } else {
+        el.textContent = '未注册 —— agent 记不进任务';
+        el.classList.add('warn');
+      }
+    }).catch(function () { if (el) el.textContent = '读取失败'; });
+  }
+
+  function showMcpSteps(text) {
+    var box = document.getElementById('mcpsteps');
+    if (!box) return;
+    box.textContent = text || '';
+    box.classList.add('show');
+    fitWindow();
+  }
+
+  var mcpBtn = document.getElementById('mcpbtn');
+  if (mcpBtn) {
+    mcpBtn.onclick = function (e) {
+      e.stopPropagation();
+      var a = api();
+      if (!a || !a.install_mcp) return;
+      mcpBtn.disabled = true;
+      mcpBtn.textContent = '注册中…';
+      a.install_mcp().then(function (r) {
+        mcpBtn.disabled = false;
+        mcpBtn.textContent = '重新注册';
+        refreshMcp();
+        if (r && r.ok) {
+          showMcpSteps('已写入 ' + r.path
+                       + (r.backup ? '\n备份：' + r.backup : '')
+                       + '\n\n' + (r.steps || ''));
+        } else {
+          showMcpSteps('注册失败：' + ((r && r.error) || '未知错误'));
+        }
+      }).catch(function (err) {
+        mcpBtn.disabled = false;
+        mcpBtn.textContent = '注册';
+        showMcpSteps('注册失败：' + ((err && err.message) || err));
+      });
+    };
+  }
+  // ★ 这里的 ✕ 语义是「收起来」，不是「关掉程序」。
+  //   原来绑的是 api().quit()，而 quit() 的实现是 window.destroy() ——
+  //   窗口被真销毁之后，托盘的「显示挂件」调 window.show() 必然抛异常，
+  //   异常又被静默吞掉 ⇒ 菜单里再也没有可用的恢复入口，
+  //   用户视角就是「关掉之后看板再也显示不出来」。
+  //   改成隐藏到托盘：窗口还在，托盘图标右键就能恢复。（真要退出走托盘菜单的「退出」。）
+  document.getElementById('openboard').onclick = function () {
+    api().open_board();
+  };
+
+  document.getElementById('rf').oninput = function () {
+    CFG.font = +this.value;
+    document.getElementById('vf').textContent = CFG.font + 'px';
+    draw(); fitWindow();
+    api().save_state({ font: CFG.font });
+  };
+  document.getElementById('ra').oninput = function () {
+    CFG.alpha = +this.value / 100;
+    document.getElementById('va').textContent = this.value + '%';
+    draw();
+    api().save_state({ alpha: CFG.alpha });
+  };
+  var rt = document.getElementById('rontop');
+  if (rt) rt.onchange = function () {
+    CFG.on_top = this.checked;
+    var a = api();
+    if (a && a.set_on_top) a.set_on_top(this.checked);
+  };
+
+  document.querySelectorAll('#theme button').forEach(function (b) {
+    b.onclick = function () {
+      CFG.theme = b.dataset.t;
+      readPanel(); draw(); fitWindow();
+      api().save_state({ theme: CFG.theme });
+    };
+  });
+
+  // 右下角缩放柄：拖动改窗口大小
+  var grip = document.getElementById('grip'), dragging = false, sx = 0, sy = 0, sw = 0, sh = 0;
+  grip.addEventListener('mousedown', function (e) {
+    dragging = true; sx = e.screenX; sy = e.screenY;
+    sw = CFG.width; sh = CFG.height;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var w = Math.max(300, Math.min(760, sw + (e.screenX - sx)));
+    var h = Math.max(120, Math.min(900, sh + (e.screenY - sy)));
+    CFG.width = w; CFG.height = h;
+    draw();                       // 字号随宽度联动
+    api().resize(w, h);
+  });
+  window.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false;
+    api().save_state({ width: CFG.width, height: CFG.height });
+  });
+}
+
+/* ---------------------------------------------------------- 启动 */
+
+async function boot() {
+  trace('boot');
+
+  // ★ 超时兜底必须**在这里**设置，不能放在函数末尾。
+  //   上一版写在最后，而卡住时恰恰卡在中间的 await ⇒ 那行永远执行不到
+  //   ⇒ 界面上只剩一句「启动中…」，什么原因都看不到。
+  //   兜底的意义就是"卡住时也能说话"，所以它必须比可能卡住的东西更早挂上。
+  clearTimeout(window.__bootTimer);
+  window.__bootTimer = setTimeout(function () {
+    var f = document.getElementById('fstat');
+    if (f && f.textContent.indexOf('启动中') === 0) {
+      showFatal('启动未完成（20 秒）',
+                '走过的步骤：' + BOOT_TRACE.join(' → ')
+                + String.fromCharCode(10) + String.fromCharCode(10)
+                + '请用 --debug 重开一次看开发者工具。');
+    }
+  }, 20000);
+
+  var a = api();
+  if (!a) return false;
+
+  try {
+    a.log('boot: api 可用, BOARD_URL=' + BOARD_URL
+          + ', 有log=' + (typeof a.log) + ', 有get_config=' + (typeof a.get_config)
+          + ', 有get_state=' + (typeof a.get_state));
+  } catch (e) {}
+
+  try {
+    trace('config');
+    // 配置走 IPC —— 这个接口只读内存，几十微秒；取数才必须走 fetch
+    var cf = await a.get_config();
+    if (cf && cf.ok) {
+      if (cf.signature) SIGN = cf.signature;
+      if (cf.on_top != null) CFG.on_top = !!cf.on_top;
+      if (cf.has_source === false) NO_SOURCE = true;
+      // 首次启动且 MCP 未注册 ⇒ 摆出引导（判据在宿主侧算，见 should_show_mcp_guide）
+      if (cf.show_mcp_guide) SHOW_MCP_GUIDE = true;
+      if (cf.build && cf.build.text) {
+        var vb = document.getElementById('vbuild');
+        if (vb) vb.textContent = cf.build.text;
+      }
+    }
+    trace('state');
+    var st = await a.get_state();
+    if (st && st.ok) {
+      CFG.width = st.width || CFG.width;
+      CFG.height = st.height || CFG.height;
+      CFG.alpha = st.alpha == null ? 1 : st.alpha;
+      // 旧版存的是 theme-a/b/c（那是「布局」，已取消）。直接用会让挂件挂在
+      // 一个不存在的 class 上 —— 表现为样式全丢，而且不报错。所以迁移掉。
+      var OLD_THEME = { 'theme-a': 1, 'theme-b': 1, 'theme-c': 1 };
+      CFG.theme = (!st.theme || OLD_THEME[st.theme]) ? CFG.theme : st.theme;
+      if (st.font) CFG.font = +st.font;
+    }
+  } catch (e) { trace('state-err'); }
+
+  try {
+    trace('ui');
+    bindUI();
+    readPanel();
+    // ★ 必须在读完配置之后调用 —— 而且**以前根本没人调用 setSign()**。
+    //   函数定义了、配置也读进来了，就是没有调用点 ⇒ 底栏署名永远空白。
+    //   这类"代码齐全但没接线"的失效不报错、不告警，只有跟配置一比才发现。
+    setSign();
+  } catch (e) {
+    // 即便 UI 绑定出问题，也要把遮罩摘掉 —— 否则用户永远看到"正在连接"
+    trace('ui-err');
+    showFatal('界面初始化失败', (e && e.stack) || (e && e.message) || String(e));
+  }
+
+  var bootEl = document.getElementById('boot');
+  if (bootEl) bootEl.remove();
+
+  // 动态加载挂件本体（宿主先拿到数据，widget.js 才有东西可渲染）
+  //
+  // ★ 内联版（host.inline.html）里 widget.js 已经由构建流程嵌在页面顶部了，
+  //   这里必须**跳过**，否则同一个文件会被求值两次：
+  //   第二次求值会把 widget.js 的模块级状态（比如折叠状态 COLLAPSED）
+  //   重置成初始值 ⇒ 用户点了收起、两秒后自己弹回来。
+  //   所以判据用"能力是否已存在"，而不是"是不是打包版" —— 前者不受打包方式影响。
+  if (window.renderWidget) {
+    trace('js-inline');
+  } else {
+    trace('load-js');
+    await new Promise(function (resolve) {
+      var s = document.createElement('script');
+      s.src = 'widget.js';
+      s.onload = function () { trace('js-ok'); resolve(); };
+      s.onerror = function () {
+        // 这个错误在真实环境里踩过一次：宿主页面原本放在 widget/host/ 下，
+        // 而 pywebview 的服务根目录 = 传给它的那个 URL 所在目录 ⇒ `../widget.js`
+        // 出不去，必然 404。现在 host.html 与 widget.js 同级，正常不该再触发。
+        document.getElementById('app').innerHTML =
+          '<div class="widget mini"><div class="err">'
+          + '<div class="e1">加载 widget.js 失败</div>'
+          + '<div class="e2">host.html 与 widget.js 必须在同一目录<br>'
+          + '当前页面：<code id="cururl"></code></div>'
+          + '</div></div>';
+        var el = document.getElementById('cururl');
+        if (el) el.textContent = location.href;
+        resolve();
+      };
+      document.body.appendChild(s);
+    });
+  }
+
+  trace('tick');
+  tick();
+  return true;
+}
+
+/* ★ 等 pywebview 就绪：用「事件 + 轮询」双保险，并给一个明确的失败出口。
+ *
+ * 原来只写了 addEventListener('pywebviewready', boot) —— 这是**竞态**：
+ * 如果该事件在注册监听之前就触发过，监听就永远等不到，
+ * 页面停在「正在连接看板…」不动，而且不报错。
+ * （实测踩到：同一个 exe 第一次能起、第二次就卡住，纯粹取决于时序。）
+ *
+ * 更根本的是：**不能存在"永远等待"这个状态**。
+ * 超过 20 秒就掀掉遮罩、把原因摆出来 —— 让用户看见"卡在哪"，
+ * 而不是对着一句"正在连接"干等。
+ */
+function waitForPywebview() {
+  var tries = 0;
+  var MAX = 100;                 // 100 × 200ms = 20s
+  (function poll() {
+    if (api()) { boot(); return; }
+    if (++tries >= MAX) {
+      var el = document.getElementById('boot');
+      if (el) {
+        el.innerHTML =
+          '<div style="text-align:center;padding:18px;line-height:1.7">'
+          + '<div style="color:var(--bad);margin-bottom:6px">无法与宿主通信</div>'
+          + '<div style="font-size:11.5px;color:var(--fg-3)">'
+          + '20 秒内没等到界面桥接就绪。<br>'
+          + '请用 <code>BoardWidget.exe --debug</code> 重开一次，<br>'
+          + '看开发者工具里的报错。</div></div>';
+      }
+      return;
+    }
+    setTimeout(poll, 200);
+  })();
+}
+
+if (api()) boot();
+else {
+  window.addEventListener('pywebviewready', function () { boot(); }, { once: true });
+  waitForPywebview();            // 事件没等到也有轮询兜底
+}
+</script>
+</body>
+</html>
