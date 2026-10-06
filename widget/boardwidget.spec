@@ -124,7 +124,7 @@ hiddenimports = [
     "server.mcp_server",
     "board.config",
     # WorkBuddy 会话镜像（在函数体内 import，静态分析看不到）
-    "board.workbuddy_watch", "board.store", "board.models", "board.orbcue",
+    "board.workbuddy_watch", "board.store", "board.models",
     # pystray 的后端也是动态选的
     "pystray._win32",
     # ★ PIL 的图片插件是**运行时按格式动态加载**的，静态分析看不到。

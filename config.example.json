@@ -3,7 +3,7 @@
   "board": {
     "title": "WorkBuddy Board",
     "db_path": "./data/board.db",
-    "_columns_comment": "栏目定义。id 是稳定标识（改 id 等于换列，旧任务会找不到列）；position 由数组顺序决定；color 取 gray/blue/amber/green/red/purple/teal/pink/coral 之一；wip_limit 为 null 表示不限；is_terminal=true 的列视为终态（用于统计完成率）；orb_state 可选，声明该列对应 OrbCue 的哪种语义（目前支持 permission），不写则按「终态→complete、非终态→working」推断",
+    "_columns_comment": "栏目定义。id 是稳定标识（改 id 等于换列，旧任务会找不到列）；position 由数组顺序决定；color 取 gray/blue/amber/green/red/purple/teal/pink/coral 之一；wip_limit 为 null 表示不限；is_terminal=true 的列视为终态（用于统计完成率）",
     "columns": [
       {
         "id": "todo",
@@ -24,8 +24,7 @@
         "title": "阻塞",
         "color": "red",
         "wip_limit": null,
-        "is_terminal": false,
-        "orb_state": "permission"
+        "is_terminal": false
       },
       {
         "id": "done",
@@ -74,11 +73,5 @@
     "port": 8791,
     "open_browser": false,
     "allow_write": false
-  },
-  "orbcue": {
-    "_comment": "桌面小球（OrbCue）事件桥。默认关。开启前请确认 OrbCue 已安装且 presenter 在运行；source 决定小球上的分组标签；exe 留空则自动找 PATH 或 %LOCALAPPDATA%\\OrbCue\\orb.exe",
-    "enabled": false,
-    "exe": null,
-    "source": "workbuddy"
   }
 }

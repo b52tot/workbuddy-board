@@ -966,7 +966,7 @@ def ensure_board_service(cfg: dict) -> tuple[bool, str]:
             with open(cfgp, "w", encoding="utf-8") as f:
                 json.dump({
                     # ★ 不要写 base_dir！
-                    #   load_config() 的顶层只接受 board / web / orbcue 三段，
+                    #   load_config() 的顶层只接受 board / web 两段，
                     #   而 base_dir 是**自动推导**的：`cfg.base_dir = 配置文件所在目录`
                     #   （见 board/config.py 的 load_config）。
                     #   把这个文件放在可写目录里，db_path 的相对路径自然就落在那里 ——

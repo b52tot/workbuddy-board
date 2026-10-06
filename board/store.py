@@ -27,8 +27,6 @@ from typing import Any, Iterable
 from .config import Config
 from .models import (Task, new_id, now_iso, progress_of, progress_fields,
                      read_progress, validate_move, validate_task_payload)
-from .orbcue import (KIND_COMPLETE, KIND_PERMISSION, KIND_RESET, KIND_START,
-                     KIND_WAITING, KIND_WORKING, OrbCueBridge)
 
 
 def _parse_iso(s: str) -> datetime:
@@ -79,16 +77,6 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self.sync_columns()
-        # OrbCue 事件桥（可选）。默认关；关着的时候 send() 是纯计数，零开销。
-        self.orb = OrbCueBridge(enabled=self.cfg.orbcue.enabled,
-                                exe=self.cfg.orbcue.exe,
-                                source=self.cfg.orbcue.source)
-        # 已经就"停滞"提醒过的任务。snapshot() 会被高频调用（Web 端每秒一次），
-        # 没有这个去重集合就会每秒吵一次 —— 提醒变噪音，比不提醒更糟。
-        self._stall_notified: set[str] = set()
-        # 已经在小球上建过会话的活跃任务。见 _ensure_sessions 的说明。
-        self._session_ensured: set[str] = set()
-        self._stall_lock = threading.Lock()
 
     # ------------------------------------------------------------ 基础设施
     def _init_schema(self) -> None:
@@ -363,10 +351,6 @@ class Store:
                             actor=actor, detail={"title": title.strip()})
             self._conn.commit()
 
-        # ★ 投递必须在锁外：send() 只入队（不阻塞），但仍不该在持锁时做
-        #   与数据库无关的事 —— 锁的持有时间要只跟「数据是否一致」相关。
-        if col not in self.cfg.terminal_ids():
-            self.orb.send(KIND_START, tid)
         return self.get_task(tid)
 
     def get_task(self, task_id: str) -> Task:
@@ -620,16 +604,6 @@ class Store:
                             from_col=t.column_id, to_col=to_column, actor=actor)
             self._conn.commit()
 
-        # 锁外投递。映射规则：终态 → complete；列上声明了 orb_state=permission
-        # 的 → permission；其余非终态 → working。
-        # 「哪一列代表等人处理」由配置声明，代码里不出现业务列名。
-        dst = self.cfg.column_by_id(to_column) or {}
-        if to_column in term:
-            self.orb.send(KIND_COMPLETE, task_id)
-        elif dst.get("orb_state") == "permission":
-            self.orb.send(KIND_PERMISSION, task_id)
-        else:
-            self.orb.send(KIND_WORKING, task_id)
         return self.get_task(task_id)
 
     def note_progress(self, task_id: str, *, key: str, value: dict[str, Any],
@@ -645,9 +619,6 @@ class Store:
             self._log_event(cur, task_id=task_id, kind="advance", actor=actor,
                             detail={"field": key, "value": value})
             self._conn.commit()
-        # 有进度上报 ⇒ 说明它还在动，对 OrbCue 而言就是「工作中」。
-        # 语义上这与本项目的停滞检测（看 seq 是否推进）是同一条事实。
-        self.orb.send(KIND_WORKING, task_id)
 
     def delete_task(self, task_id: str, *, actor: str = "agent") -> None:
         t = self.get_task(task_id)
@@ -658,9 +629,6 @@ class Store:
                             from_col=t.column_id, actor=actor,
                             detail={"title": t.title})
             self._conn.commit()
-        # 任务没了 ⇒ 让小球上那一行也消失。用 reset 而不是 closed：
-        # closed 是「会话真的结束了」，而这里是「这条记录被抹掉了」。
-        self.orb.send(KIND_RESET, task_id)
 
     # ------------------------------------------------------------ 停滞检测
     def _last_event_at(self, task_ids: list[str]) -> dict[str, str]:
@@ -745,52 +713,6 @@ class Store:
         out.sort(key=lambda x: x["idle_sec"], reverse=True)
         return out
 
-    def _ensure_sessions(self, active_ids: set[str]) -> None:
-        """确保活跃任务在小球上都有会话。
-
-        ★ 为什么需要这一步（实测踩到过）：
-        OrbCue 的契约规定，`waiting_input` / `permission_requested` /
-        `completed` / `failed` / `cancelled` 这五类事件**对未知会话 accepted
-        但不建记录**（它的用意是防用户 reset 后迟到的事件复活计数）。
-        于是「看板里本来就存在、但桥接开启之前就建好的」任务，直接发 waiting
-        会被静默丢弃 —— 实测现象就是：本地 `sent=3`，而 OrbCue 侧 `tracked=0`。
-        **两边都"成功"，中间什么都没发生。**
-
-        合理解法：在「看到它」的时候就把会话建出来（用 working，语义上是
-        "这个任务在动或至少在盯着"），之后的 waiting / complete 才有落点。
-
-        用集合去重，所以只在第一次看到某个活跃任务时发一条。
-        """
-        if not self.orb.enabled:
-            return
-        with self._stall_lock:
-            fresh = active_ids - self._session_ensured
-            self._session_ensured &= active_ids      # 离开活跃集合的摘掉（可再次补建）
-            self._session_ensured |= fresh
-        for tid in fresh:
-            self.orb.send(KIND_WORKING, tid)
-
-    def _notify_stalls(self, stalled_ids: set[str]) -> None:
-        """把**新出现**的停滞推给 OrbCue。每条只推一次。
-
-        为什么要去重：`snapshot()` 是高频读（Web 端 1s 一次）。若每次都对
-        `stalled_ids` 里的任务发事件，小球会每秒响一次 —— 提醒变噪音，
-        比不提醒更糟。
-
-        什么时候允许再提醒：任务**恢复上报**后就不在 `stalled_ids` 里了，
-        标记被 `&=` 摘掉；下次再停滞时重新提醒。所以语义是
-        「每一次『动着动着停了』提醒一次」，而不是「每个任务一辈子只提醒一次」。
-        被删掉 / 移到终态的任务同样自动摘除。
-        """
-        if not self.orb.enabled:
-            return
-        with self._stall_lock:
-            fresh = stalled_ids - self._stall_notified
-            self._stall_notified &= stalled_ids      # 恢复的、被删的、已完成的都摘掉
-            self._stall_notified |= fresh
-        for tid in fresh:
-            self.orb.send(KIND_WAITING, tid)
-
     # ------------------------------------------------------------ 聚合视图
     def snapshot(self, *, since_seq: int = 0) -> dict[str, Any]:
         """给看板用的一次性完整快照。前端只读，不做任何写入。
@@ -826,13 +748,6 @@ class Store:
         stalled_rows = self.list_stalled()
         stalled_ids = {t["id"] for t in stalled_rows}
         idle_by_id = {t["id"]: t.get("idle_sec") for t in stalled_rows}
-        # 停滞是最贵的一种"看不见"：慢任务会长嘴，卡死的不会。
-        # 所以这里顺手把它推给桌面小球 —— OrbCue 对这个语义会给提示音，
-        # 而那正是「有任务卡住了」最该被你知道的时刻。
-        # ★ 必须先补建会话：OrbCue 对未知会话的 waiting 事件只 accepted 不建记录，
-        #   顺序反了就会「本地 sent 有值、小球上什么都没有」。
-        self._ensure_sessions({t.id for t in tasks if t.column_id not in term})
-        self._notify_stalls(stalled_ids)
         for cid, lst in by_col.items():
             for d in lst:
                 if d["id"] in idle_by_id:

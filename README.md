@@ -338,21 +338,6 @@ workbuddy-board/
 
 ## 设计取舍
 
-### 为什么没有接桌面悬浮球（OrbCue）
-
-试过，**已弃用**（2026-10-05）。技术上完全可行 —— OrbCue 有公开的事件契约，
-还在 `examples/mcp-skill-note.md` 里专门写了「MCP / Skill 集成说明」，
-本项目也确实接通了（`board/orbcue.py`，测试齐全，默认关闭）。
-
-**弃用原因是产品层面**：OrbCue 面板**刻意不显示任务内容**
-（它的领域文档写着「不读取 transcript、prompt、命令、代码、终端输出」），
-条目名只显示 `source`（工具名）。于是看板上所有任务在球上**都叫同一个名字**，
-无法分辨谁是谁 —— 对「一眼看出哪个任务卡住」这个诉求**没有可用性**。
-
-代码保留（默认 `enabled: false`），哪天它的展示端能显示任务标识了可以再开。
-
-
-
 **手写 JSON-RPC，不用 `mcp` SDK。**
 PyPI 的 `mcp>=1.0.0` 已拉到 2.x，FastMCP 在 2.x 更名为 MCPServer，
 照抄旧写法必崩。stdio JSON-RPC 只有 `initialize` / `tools/list` / `tools/call`

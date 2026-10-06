@@ -127,24 +127,9 @@ class WebConfig:
 
 
 @dataclass
-class OrbCueConfig:
-    """OrbCue 桌面小球的事件桥（可选）。
-
-    默认 **关**。开之前请先确认 OrbCue 已装且 presenter 在跑 ——
-    桥本身不会自己去启动一个 GUI 程序。
-    """
-    enabled: bool = False
-    # 留空则自动找：先 PATH 里的 `orb`，再 %LOCALAPPDATA%\\OrbCue\\orb.exe
-    exe: str | None = None
-    # 事件里的 source 名。小球上按它分组，所以它决定你看到的分组标签。
-    source: str = "workbuddy"
-
-
-@dataclass
 class Config:
     board: BoardConfig = field(default_factory=BoardConfig)
     web: WebConfig = field(default_factory=WebConfig)
-    orbcue: OrbCueConfig = field(default_factory=OrbCueConfig)
     source: str | None = None  # 实际读到的配置文件路径，便于排查
     base_dir: str | None = None  # 相对路径（db_path 等）的解析基准
 
@@ -286,12 +271,10 @@ def load_config(path: str | None = None) -> Config:
                 _merge_dataclass(cfg.board, raw["board"])
             if "web" in raw:
                 _merge_dataclass(cfg.web, raw["web"])
-            if "orbcue" in raw:
-                _merge_dataclass(cfg.orbcue, raw["orbcue"])
-            unknown = {k for k in raw if k not in ("board", "web", "orbcue")
+            unknown = {k for k in raw if k not in ("board", "web")
                        and not _is_comment_key(k)}
             if unknown:
-                raise ConfigError("配置文件顶层只支持 board / web / orbcue，发现: %s"
+                raise ConfigError("配置文件顶层只支持 board / web，发现: %s"
                                   % sorted(unknown))
             cfg.source = str(p)
             # 相对路径以「配置文件所在目录」为基准 —— 这样不管谁把进程
