@@ -2,6 +2,8 @@
 
 > **WorkBuddy 写的 WorkBuddy 看板 —— 让英雄查英雄。不耽误打游戏了。**
 
+<img src="docs/widget.png" width="380" alt="挂件界面：四列任务常驻桌面，停滞的会标黄">
+
 给 WorkBuddy（或任何支持 MCP 的 Agent）用的**通用任务看板**。
 
 Agent 干活时最难受的不是慢，是**看不见** —— 命令交出去之后跑到哪一步、卡在哪儿、
