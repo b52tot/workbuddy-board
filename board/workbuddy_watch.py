@@ -186,6 +186,31 @@ def _close_open(store, ent: dict, why: str) -> str | None:
         return None
 
 
+def _live_calls(calls: dict, ts: float, ttl: float) -> dict:
+    """挑出**还算数**的未配对调用。
+
+    ★ 为什么必须有 TTL：`calls` 是跨轮次累积在 state 里的，而配对靠 callId。
+      只要有一次漏配（文件被重写、游标错位、进程中途重启），那个 callId
+      就永远留在里面 ⇒ busy 永远为真 ⇒ **「空闲自动收尾」再也不会触发**。
+
+      实测踩到：state 里积了 15 个陈旧 callId，看板上每一个任务都只能靠
+      「下一条请求来了」顺手收掉，用户看到的就是「活干完了还挂在进行中，
+      还标着已 N 分钟无进展」。
+
+    ★ 旧格式（值为 `1`，没有时间戳）一律视为陈旧 —— 这样升级之后，
+      已经积下来的残留会立刻失效，不必手工去清 state。
+    """
+    out = {}
+    for cid, t in (calls or {}).items():
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            continue
+        if t > 1.0 and (ts - t) < ttl:
+            out[cid] = t
+    return out
+
+
 def poll(store, cfg, now: float | None = None) -> dict[str, Any]:
     """跑一次巡检。返回一个描述本次结果的 dict（绝不抛异常）。
 
@@ -247,7 +272,7 @@ def poll(store, cfg, now: float | None = None) -> dict[str, Any]:
                     if typ == "function_call":
                         cid = rec.get("callId")
                         if cid:
-                            calls[str(cid)] = 1
+                            calls[str(cid)] = ts      # 记下"什么时候见到它"
                     elif typ == "function_call_result":
                         cid = rec.get("callId")
                         if cid:
@@ -304,8 +329,9 @@ def poll(store, cfg, now: float | None = None) -> dict[str, Any]:
         for p, e in list(files.items()):
             if not e.get("open_task"):
                 continue
-            e_calls = e.get("calls") or {}
-            if e_calls:
+            live = _live_calls(e.get("calls"), ts, idle_close)
+            e["calls"] = live            # 顺手清掉陈旧的，别让它越积越多
+            if live:
                 busy_now = True
                 continue
             try:
@@ -315,7 +341,7 @@ def poll(store, cfg, now: float | None = None) -> dict[str, Any]:
             if quiet >= idle_close:
                 res["closed"] = _close_open(store, e, "idle") or res["closed"]
         # busy 反映"当前这个文件"的状态（界面只关心正在跑的那个）
-        res["busy"] = bool(calls) or busy_now
+        res["busy"] = bool(_live_calls(calls, ts, idle_close)) or busy_now
 
         _save_state(store, st)
     except Exception as e:                                     # noqa: BLE001

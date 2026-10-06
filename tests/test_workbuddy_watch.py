@@ -151,6 +151,65 @@ class TestReverseArms(WatchBase):
         self.poll_at(9999.0)
         self.assertEqual(self.doing(), [], "调用已回执且安静够久 ⇒ 应已收尾")
 
+    def test_stale_unmatched_call_does_not_block_closing(self):
+        """★ 残留的未配对调用**不能永远**挡住收尾。
+
+        实测踩到：state 里积了 15 个陈旧 callId，`busy` 永远为真，
+        「空闲自动收尾」从未触发过 —— 任务干完了还挂在「进行中」，
+        一直挂到下一条请求来了才被顺手收掉。用户看到的就是
+        「任务完成了没有更新状态」。
+        """
+        self.write([user_msg("<user_query>这一轮已经干完了</user_query>"),
+                    fcall("call-never-returns")])
+        # 第一轮：刚见到这个调用 ⇒ 算忙，不收尾
+        self.poll_at(0.0)
+        self.assertEqual(len(self.doing()), 1, "刚发出的调用应算「还在忙」")
+
+        # 又过了很久，这个调用始终没有回执 ⇒ 视为陈旧，不该再挡着
+        r = self.poll_at(9999.0)
+        self.assertEqual(self.doing(), [],
+                         "陈旧的未配对调用不该永久挡住收尾")
+        self.assertFalse(r["busy"], "陈旧调用不该再让界面显示「忙」")
+
+    def test_legacy_call_format_is_treated_as_stale(self):
+        """旧 state 里 calls 的值是 `1`（没有时间戳）。
+
+        升级后这些残留必须**立刻**失效 —— 否则用户看到的现象和没修一样。
+        """
+        self.write([user_msg("<user_query>老库里的任务</user_query>"), asst_msg()])
+        self.poll_at(0.0)
+        tid = self.doing()[0].id
+
+        # 手工把 state 改回旧格式：calls 里挂着一个值为 1 的调用
+        st = {"files": {self.tp: {"pos": 99, "open_task": tid,
+                                  "calls": {"call-from-old-version": 1}}}}
+        self.store.meta_set(ww.K_STATE, json.dumps(st))
+
+        self.poll_at(9999.0)
+        self.assertEqual(self.doing(), [],
+                         "旧格式（值=1）的残留调用必须被当作陈旧")
+
+    def test_fresh_call_after_stale_ones_still_blocks(self):
+        """陈旧的要清掉，但**新的**未配对调用必须照旧挡住收尾。
+
+        只清不判就成了"为了收尾牺牲正确性"—— 那会把还在跑的长任务提前标完成。
+        这里直接构造"一个陈旧残留 + 一个刚看到的调用"共存的状态。
+        """
+        import time as _time
+        self.write([user_msg("<user_query>又跑一个长任务</user_query>"), asst_msg()])
+        self.poll_at(0.0)
+        tid = self.doing()[0].id
+
+        st = {"files": {self.tp: {"pos": 99, "open_task": tid,
+                                  "calls": {"call-ancient": 1.0,        # 旧格式残留
+                                            "call-just-now": _time.time()}}}}
+        self.store.meta_set(ww.K_STATE, json.dumps(st))
+
+        r = self.poll_at(0.0)
+        self.assertTrue(r["busy"], "刚看到的未配对调用必须仍算「忙」")
+        self.assertEqual(len(self.doing()), 1,
+                         "新调用在跑时不能收尾 —— 否则长任务会被提前标完成")
+
     def test_first_sight_does_not_backfill_history(self):
         """★ 首次见到文件时只认最后一条请求 —— 否则一开开关就灌一屏历史。"""
         self.write([user_msg("<user_query>很久以前的请求 A</user_query>"),
