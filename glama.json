@@ -1,0 +1,26 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "b52tot"
+  ],
+  "name": "workbuddy-board",
+  "description": "Task board for MCP agents that lives on your desktop: four columns for agents to write into, per-task progress, stall detection and an append-only event log — plus an always-on-top Windows widget so you can watch a run without switching windows. Single-file build, zero third-party dependencies.",
+  "keywords": [
+    "mcp",
+    "kanban",
+    "task-management",
+    "task-board",
+    "desktop-widget",
+    "progress-tracking",
+    "stall-detection",
+    "sqlite",
+    "agent-orchestration"
+  ],
+  "license": "MIT",
+  "language": "python",
+  "type": "mcp_server",
+  "transport": [
+    "stdio"
+  ],
+  "tools": 15
+}

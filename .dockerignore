@@ -1,0 +1,30 @@
+# 构建上下文瘦身。
+#
+# 镜像里只需要 board/ 和 server/（MCP server 的全部代码）。
+# 其余都可以排除 —— 尤其 widget/build/（PyInstaller 中间产物，约 23MB）
+# 和 data/（本地看板库），它们对容器毫无用处，却会让构建上下文大出一个量级。
+
+.git/
+.github/
+.workbuddy/
+
+# 运行时数据与本地配置
+data/
+config.json
+
+# 构建产物
+widget/
+release-site/
+
+# 测试、文档、示例、前端 —— MCP server 用不到
+tests/
+docs/
+examples/
+web/
+*.md
+*.cmd
+*.bak-*
+LICENSE
+
+# 本地说明文件
+AGENTS.md
