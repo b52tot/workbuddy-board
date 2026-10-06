@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import shutil
@@ -868,6 +869,55 @@ def log_exc(where: str) -> None:
         pass
 
 
+_EXIT_LOGGED = False
+
+
+def log_exit(reason: str) -> None:
+    """记一条「进程正在结束」。
+
+    ★ 这是整条诊断链的**合拢点**，也是唯一能区分「谁关的」与「被杀的」的判据：
+
+      日志里**有「=== 启动 ===」却没有对应的「=== 进程结束 ===」**
+      ⇒ 进程是被**强制终止**的（TerminateProcess / 原生崩溃），
+        因为 atexit 在那种情况下根本不会执行。
+
+    为什么必须补这条：这次挂件忽然消失，日志停在正常的 2 秒轮询上，
+    既没有任何异常、也没有退出痕迹 —— 于是**既证明不了是崩溃、
+    也证明不了是人为关闭**，只能去翻系统事件日志反推。
+    取证通道只记「走到了哪」不够，还得记「是怎么结束的」。
+
+    ★ 只记一次：quit() → destroy() → atexit 会连着触发，
+      重复写会让人误以为退出了两回。
+    """
+    global _EXIT_LOGGED
+    if _EXIT_LOGGED:
+        return
+    _EXIT_LOGGED = True
+    log("=== 进程结束 === 原因=%s pid=%d" % (reason, os.getpid()))
+
+
+def _thread_excepthook(args) -> None:
+    """后台线程里的未捕获异常。
+
+    ★ 挂件有会话镜像、窗口操作等好几个后台线程。它们抛异常时默认只打到
+      stderr —— 而打包版是 windowed，stderr 直接进虚空。结果是线程死了、
+      界面还在、某个功能悄悄不工作，没有任何线索。必须落盘。
+    """
+    import traceback
+    try:
+        log("!! 后台线程 %s 未捕获异常: %s: %s"
+            % (getattr(args.thread, "name", "?"),
+               getattr(args.exc_type, "__name__", args.exc_type),
+               args.exc_value))
+        log("".join(traceback.format_exception(
+            args.exc_type, args.exc_value, args.exc_traceback)))
+    except Exception:
+        pass
+
+
+threading.excepthook = _thread_excepthook
+
+
 def _spawn_serve_process():
     """起一个独立的看板服务进程（`--serve`）。
 
@@ -1469,8 +1519,12 @@ def main() -> int:
     # ★ 先确保看板服务可用，再开窗口。
     #   这是"拷到别的电脑就能用"的前提：那台机器上什么都没有，
     #   服务必须由挂件自己带起来。
-    log("=== 启动 ===")
+    log("=== 启动 === pid=%d argv=%s" % (os.getpid(), sys.argv[1:]))
     log("frozen=%s  exe=%s" % (getattr(sys, "frozen", False), sys.executable))
+    # ★ 退出兜底：只要 Python 是**正常结束**，这条一定会落盘。
+    #   反过来，日志里"有启动、没有结束"就直接说明进程是被强杀的 ——
+    #   这是本次事件唯一能一刀切开的判据。
+    atexit.register(log_exit, "atexit")
     log("RES=%s" % RES)
     log("DATA=%s" % DATA)
     log("配置=%s" % CONF_PATH)
@@ -1570,6 +1624,25 @@ def main() -> int:
             os._exit(0)
 
         threading.Thread(target=_windowtest, daemon=True).start()
+
+    # ------------------------------------------------------------ --quittest
+    # 走**完整的正常退出路径**（api.quit() → destroy → webview 循环结束 → atexit），
+    # 用来验证「退出时确实会留下日志」。
+    #
+    # ⚠️ 不能拿 --windowtest 代替：它最后是 os._exit(0)，**绕过 atexit**，
+    #    那样测出来的"没有结束日志"是测试自己的性质，不是被测对象的问题 ——
+    #    正好会把这个用例变成恒假的装饰品。
+    if "--quittest" in sys.argv:
+        def _quittest():
+            time.sleep(6)                       # 等 webview 真的起来
+            log("--quittest: 主动调用 api.quit()")
+            try:
+                r = api.quit()
+                log("--quittest: api.quit() 返回 %r" % (r,))
+            except Exception as e:
+                log("--quittest: api.quit() 抛异常 %s: %s" % (type(e).__name__, e))
+
+        threading.Thread(target=_quittest, daemon=True).start()
     if "--stresstest" in sys.argv:
         def _stress():
             import time as _t
@@ -1775,27 +1848,37 @@ def main() -> int:
             tray.set_visible(v)
 
     def _quit() -> None:
+        # ★ 这一整段原先**一句日志都没有** —— 而它正是托盘「退出」的唯一入口。
+        #   于是"从托盘退出后日志戛然而止"这个现象，既证明不了是崩溃、
+        #   也证明不了是人为关闭。现在每一步都记账，且先落「进程结束」再 destroy。
+        log("【托盘·退出】被点击，开始收尾")
         try:
             if tray:
                 tray.stop()
+                log("  托盘已停止")
         except Exception:
-            pass
+            log_exc("_quit/tray.stop")
         try:
             # 只收掉我们自己拉起来的那个服务进程；
             # 若是用户已有的外部服务（external），绝不能动它
             if getattr(ensure_board_service, "_child", None) is not None:
                 ensure_board_service._child.terminate()
+                log("  已终止挂件自己拉起的看板服务子进程")
         except Exception:
-            pass
+            log_exc("_quit/kill_child")
         try:
             api.cfg["x"], api.cfg["y"] = window.x, window.y
             save_json(STATE_PATH, api.cfg)
+            log("  窗口位置已保存 x=%s y=%s" % (api.cfg["x"], api.cfg["y"]))
         except Exception:
-            pass
+            log_exc("_quit/save_state")
+        # 先落「进程结束」，再 destroy —— 万一 destroy 自己抛异常，记录也已经在盘上了
+        log_exit("托盘·退出")
         try:
             window.destroy()
+            log("  window.destroy() 已返回")
         except Exception:
-            pass
+            log_exc("_quit/window.destroy")
 
     # ★ 托盘这一段的每一步都要记账。
     #   之前它静默失败（start() 返回 False 或抛异常都被吞掉），
@@ -1848,11 +1931,16 @@ def main() -> int:
 
     # 退出时记住位置，下次原样恢复
     def on_closed():
-        try:
-            api.cfg["x"], api.cfg["y"] = window.x, window.y
-            save_json(STATE_PATH, api.cfg)
-        except Exception:
-            pass
+        # 窗口被 destroy（或从外部关闭）时会走到这里。
+        # 记下来的意义：把「窗口真的没了」和「进程被强杀」区分开。
+        log("【窗口 closed 事件】")
+        log_exit("窗口 closed")
+        # ★ 这里**不能**再读 window.x / window.y：走到 closed 时窗口已经销毁，
+        #   pywebview 的 get_position 返回 None，解包直接 TypeError。
+        #   原先这个异常被 `except: pass` 吞掉，加了日志才现形 ——
+        #   它每次正常退出都会白刷一段 traceback，把真正有用的行淹掉。
+        #   位置在 quit() 里已经存过，这里不需要重复。
+        #   （2026-10-07 实测：--quittest 走到这里必抛）
     window.events.closed += on_closed
 
     debug = "--debug" in sys.argv
@@ -1860,6 +1948,7 @@ def main() -> int:
     try:
         webview.start(debug=debug, gui="edgechromium")
         log("webview.start 正常返回")
+        log_exit("webview 循环正常退出")
     except Exception:
         log_exc("webview.start")
         raise
