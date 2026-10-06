@@ -17,14 +17,15 @@ WORKDIR /app
 COPY board/ ./board/
 COPY server/ ./server/
 
-# MCP server 的配置从 config.json 读（看板库位置等）。
-# 容器里单独给一个可写目录，避免写到只读的镜像层。
-RUN mkdir -p /data \
- && printf '%s\n' \
-      '{' \
-      '  "board": { "db_path": "/data/board.db" },' \
-      '  "web": { "allow_write": false }' \
-      '}' > /app/config.json
+# 配置直接复用 config.example.json —— 它是**单一事实来源**。
+# 别在这里手写一段 JSON：手写的那份会缺 board.fields，于是容器里
+# update_progress 直接不可用（"配置里没有任何 progress 字段"），
+# 而 tools/list 照样全绿 —— 正是那种「看起来更好」的静默失效。
+#
+# db_path 保持模板里的 ./data/board.db：config.resolve_path 以**配置文件所在目录**
+# 为基准解析相对路径，所以落在 /app/data/board.db，容器内可写（Store 会自建目录）。
+# 想持久化就 -v 一个卷到 /app/data。
+COPY config.example.json ./config.json
 
 ENV WBB_CONFIG=/app/config.json
 ENV PYTHONUNBUFFERED=1

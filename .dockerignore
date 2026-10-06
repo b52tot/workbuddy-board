@@ -11,6 +11,8 @@
 # 运行时数据与本地配置
 data/
 config.json
+# ★ config.example.json 是**故意保留**的：Dockerfile 把它 COPY 成镜像里的
+#   config.json（单一事实来源）。别写成 config*.json 把它一起排掉。
 
 # 构建产物
 widget/

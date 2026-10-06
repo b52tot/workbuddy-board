@@ -142,6 +142,32 @@ nohup python -m server.web_server > board.log 2>&1 &
 
 > 看板是**无状态服务**：随时可以重启，数据全在 SQLite 里，重启后状态一致。
 
+## 用 Docker 跑 MCP server（可选）
+
+MCP server 只依赖 Python 标准库，所以镜像里**没有 `pip install` 这一步**，
+构建出来也很小。Docker 主要给两类场景用：把它跑在与宿主隔离的环境里，
+以及让 [Glama](https://glama.ai/) 这类目录站自动做一次「能起来、能应答」的检查。
+
+```bash
+# 构建
+docker build -t workbuddy-board .
+
+# 以 stdio 跑 MCP server（由客户端拉起，不监听端口）
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' \
+  | docker run -i --rm workbuddy-board
+```
+
+镜像里的 `config.json` 直接来自 `config.example.json`（不另写一份，避免两处漂移），
+所以 `db_path` 仍是相对路径 `./data/board.db` —— 它以配置文件的所在目录为基准解析，
+最终落在容器内的 `/app/data/board.db`。想让它活过容器生命周期，挂个卷：
+
+```bash
+docker run -i --rm -v wbb-data:/app/data workbuddy-board
+```
+
+> 网页界面（`server/web_server.py`）不包含在这个镜像里 —— MCP server 用不到它。
+> 需要网页端就按上面的方式在宿主上直接跑。
+
 ## 接入 WorkBuddy
 
 WorkBuddy 通过 MCP 以 stdio 方式拉起 `server/mcp_server.py`。
