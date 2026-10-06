@@ -1,0 +1,18 @@
+# 行尾钉死 —— 不要依赖各人机器上的 core.autocrlf 设置。
+#
+# 为什么 Dockerfile 必须是 LF：
+#   * `RUN ... \` 续行里混进 \r，命令会带上一个看不见的字符，
+#     报出来的错和真正的原因完全对不上；
+#   * shell 脚本带 CRLF 会报 `/usr/bin/env: 'bash\r': No such file or directory`。
+# 反过来 Windows 批处理必须 CRLF，否则 cmd 解析会出问题。
+
+Dockerfile  text eol=lf
+*.sh        text eol=lf
+*.py        text eol=lf
+*.json      text eol=lf
+*.sql       text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
