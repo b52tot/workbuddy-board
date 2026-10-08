@@ -253,6 +253,12 @@ workbuddy-board/
 
 ---
 
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
+
+---
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。
