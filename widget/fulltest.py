@@ -119,6 +119,11 @@ window.pywebview = { api: {
   set_on_top: function () { __rec('set_on_top', arguments); return Promise.resolve({ ok: true }); },
   set_alpha: function () { __rec('set_alpha', arguments); return Promise.resolve({ ok: true }); },
   start_board: function () { __rec('start_board', arguments); return Promise.resolve({ ok: true }); },
+  // ★ 右键菜单用到的三个。桩里**必须真的有**：少了它们，前端会走
+  //   "宿主不支持"那条分支，而相关判据照样绿 —— **假绿比红更坏**。
+  task_archive: function () { __rec('task_archive', arguments); return Promise.resolve({ ok: true, archived: 1 }); },
+  task_delete: function () { __rec('task_delete', arguments); return Promise.resolve({ ok: true }); },
+  task_restore: function () { __rec('task_restore', arguments); return Promise.resolve({ ok: true, restored: 1 }); },
   quit: function () { __rec('quit', arguments); return Promise.resolve({ ok: true }); },
   get_events: function () { __rec('get_events', arguments); return Promise.resolve({ ok: true, events: [] }); },
   mcp_status: function () {
@@ -479,12 +484,14 @@ DRIVER = r"""
       window.CUR_STATE = 'expanded'; window.draw();
       var want = Math.min(window.contentHeight() + 8, 900);
       var appScroll = document.getElementById('app').scrollHeight;
-      clearIPC();
       window.fitWindow();
-      var rs = ipc('resize');
-      var got = rs ? rs.a[1] : null;
+      // ★ 契约变了（2026-10-08）：热路径上不再有 JS→Python 调用，所以**不能**再量
+      //   "IPC 里有没有 resize"这个代理指标 —— 前端现在只负责算高度，
+      //   真正的 resize 由 Python 在每次推送时调 WB_NEED_H() 取走。
+      //   要量的就是「前端报给 Python 的那个值」。
+      var got = window.WB_NEED_H();
       chk('布局/窗口高度贴合内容（不是固守旧高度）',
-          got !== null && Math.abs(got - want) <= 20,
+          got !== null && got > 0 && Math.abs(got - want) <= 20,
           '期望≈' + Math.round(want) + ' 实际=' + got
           + '（内容=' + Math.round(window.contentHeight())
           + ' #app.scrollHeight=' + appScroll + '）');
@@ -971,6 +978,73 @@ DRIVER = r"""
     }
     chk('点击位置/点卡片的每个部位都能进详情',
         cardRes.every(function (s) { return /:生效$/.test(s); }), cardRes.join(' '));
+
+    /* ------------------------------------------------ 任务右键菜单 */
+    // ★ 判据只量**用户看得见的东西**：菜单 DOM 真的出现、真的有两项、点别处真的消失。
+    //   断言"openTaskMenu 被定义了"是装饰品 —— 菜单压根画不出来时它照样绿。
+    window.CUR_STATE = 'expanded'; window.CUR_TASK = null; window.draw();
+    await frame();
+    (function () {
+      function menu() { return document.getElementById('ctxmenu'); }
+      function rightClick(el, x, y) {
+        el.dispatchEvent(new MouseEvent('contextmenu',
+          { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+      }
+
+      var c0 = q('.card');
+      if (!c0) { chk('右键菜单/有卡片可测', false, '列表里没有卡片'); return; }
+
+      // 正向臂：右键卡片 ⇒ 菜单出现，且归档 + 删除都在
+      rightClick(c0, 40, 60);
+      var m = menu();
+      var acts = [];
+      if (m) {
+        var its = m.querySelectorAll('[data-m]');
+        for (var i = 0; i < its.length; i++) acts.push(its[i].getAttribute('data-m'));
+      }
+      chk('右键菜单/右键卡片能弹出且含归档+删除',
+          !!m && acts.indexOf('archive') >= 0 && acts.indexOf('delete') >= 0,
+          m ? ('项=' + acts.join(',')) : '**根本没弹出**');
+
+      // 反向臂：在非卡片区域右键 ⇒ **不该**弹
+      //   （没有这条，一个"任何位置右键都弹"的实现也能让上面那条全绿）
+      window.closeTaskMenu();
+      var blank = q('#fstat');
+      if (blank) rightClick(blank, 20, 200);
+      chk('右键菜单/非卡片区域右键不弹', !menu(),
+          menu() ? '**不该弹却弹了**' : 'ok');
+
+      // 删除必须点两次才真的删（就地二次确认）—— 防误删
+      window.closeTaskMenu();
+      rightClick(c0, 40, 60);
+      var m2 = menu();
+      var del = m2 && m2.querySelector('[data-m="delete"]');
+      clearIPC();
+      if (del) del.onclick({ stopPropagation: function () {} });
+      var armed = !!(del && del.getAttribute('data-armed') === '1');
+      var fired = ipcCount('task_delete');
+      // ★ 必须带上 `!!api().task_delete` 这个**分母**：
+      //   只看 `fired === 0` 的话，桩桥接里压根没有这个方法时也是 0 ——
+      //   "没发出去"和"发不出去"长得一模一样，判据就成了装饰品。
+      chk('右键菜单/删除要点两次（第一次只武装，不落库）',
+          armed && fired === 0 && !!(api() && api().task_delete),
+          '已武装=' + armed + ' 第一次就调用 task_delete=' + fired + ' 次'
+          + ' 桩里有该方法=' + !!(api() && api().task_delete));
+
+      // 归档是单击即生效（它可逆，不需要二次确认）
+      window.closeTaskMenu();
+      rightClick(c0, 40, 60);
+      var m3 = menu();
+      var arc = m3 && m3.querySelector('[data-m="archive"]');
+      clearIPC();
+      var tid = c0.getAttribute('data-task');
+      if (arc) arc.onclick({ stopPropagation: function () {} });
+      var calls = window.__IPC.filter(function (c) { return c.n === 'task_archive'; });
+      chk('右键菜单/归档单击即调用且带对 id',
+          calls.length === 1 && calls[0].a[0] === tid,
+          '调用=' + calls.length + ' 传入id=' + (calls[0] && calls[0].a[0]) + ' 期望=' + tid);
+      window.closeTaskMenu();
+    })();
 
     // 非交互区域点了不能有任何副作用
     window.CUR_STATE = 'expanded'; window.CUR_TASK = null; window.draw();

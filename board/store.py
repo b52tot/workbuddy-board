@@ -229,6 +229,32 @@ class Store:
             self._conn.commit()
             return {"ok": True, "restored": n}
 
+    def archive_task(self, task_id: str, *, actor: str = "user") -> dict[str, Any]:
+        """归档**单个**任务：打上 archived_at 标记，从主视图消失，**一条数据都不删**。
+
+        与 `archive_done` 的分工：那个是"按完成时间 + 保留期"的**批量策略**；
+        这个是"用户在看板上右键某张卡片，就想让它当场让开"的**手动动作**。
+        两者共用同一列 archived_at，所以 `restore_archived` 能把它们一起捞回来。
+
+        用 `archived_at IS NULL` 兜底，重复归档不会覆盖掉首次归档时间
+        （那个时间是保留期计数的依据，被刷新会让"归档多久了"永远算不对）。
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE tasks SET archived_at=? WHERE id=? AND archived_at IS NULL",
+                (now_iso(), task_id))
+            if not cur.rowcount:
+                # 两种情况要分清楚，别糊成一句"失败"
+                row = self._conn.execute(
+                    "SELECT archived_at FROM tasks WHERE id=?", (task_id,)).fetchone()
+                self._conn.commit()
+                if row is None:
+                    return {"ok": False, "error": "任务不存在: %s" % task_id}
+                return {"ok": True, "archived": 0, "note": "已经是归档状态"}
+            self._log_event(cur, task_id=task_id, kind="archive", actor=actor)
+            self._conn.commit()
+            return {"ok": True, "archived": 1, "task_id": task_id}
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

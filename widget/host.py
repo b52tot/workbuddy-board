@@ -318,6 +318,93 @@ class BoardApi:
             self.start_watch()
             return self._store
 
+    # ------------------------------------------------------ 主动推送
+    #
+    # ★★ 热路径方向反转 —— 2026-10-08 事故后的结构性修复，不是加保险丝。
+    #
+    #   原先前端每 2 秒 `await pywebview.api.get_board()`。而 pywebview 处理
+    #   **每一次 JS→Python 调用**都会 `Thread(target=_call).start()`
+    #   （webview/util.py:335），线程结尾再 `evaluate_js` 回 UI 线程
+    #   （edgechromium.py:152 的 Invoke + semaphore.acquire）。
+    #
+    #   实测：每 2 秒 5 次调用 ⇒ **3 小时累积 12796 个线程 / 913MB / 118255 句柄**，
+    #   界面完全无响应，任务管理器都杀不掉。
+    #
+    #   而 **Python 主动调 evaluate_js 不创建线程**。所以改成 Python 推：
+    #   热路径上一次 JS→Python 调用都没有，那条泄漏通道**从根上关掉**。
+    #
+    #   附带：推送时用**同一次** evaluate_js 把窗口高度也问回来，
+    #   于是前端 fitWindow 也不必再调 resize —— 又省掉一类调用。
+    def start_push(self) -> None:
+        if getattr(self, "_push_thread", None) is not None:
+            return
+        gap = 2.0
+
+        def loop():
+            # 给页面加载留点时间；若 WB_PUSH 还没挂上，_push_once 会安静跳过
+            time.sleep(2.5)
+            while True:
+                try:
+                    self._push_once()
+                except Exception:
+                    log_exc("push_loop")       # 旁路不许把挂件带崩
+                time.sleep(gap)
+
+        self._push_thread = threading.Thread(target=loop, daemon=True,
+                                             name="wb-push")
+        self._push_thread.start()
+        log("主动推送线程已启动（%.1fs 一次；热路径上不再有 JS→Python 调用）" % gap)
+
+    def _push_once(self) -> None:
+        """推一次数据，并顺手把窗口高度调好。"""
+        if self._window is None:
+            return
+        # ★ 窗口收进托盘时**什么都不做**。不是省事，是必须：
+        #   下面那句 resize 会把已隐藏的窗口重新显示出来，
+        #   于是"收进托盘后一有新任务就自己冒出来"（2026-10-08 用户实测）。
+        #   恢复显示时 show_window() 会补推一次，不会漏数据。
+        if not getattr(self, "_visible", True):
+            return
+        data = self.get_board()
+        payload = json.dumps({
+            "ok": bool(data.get("ok")),
+            "board": data.get("board"),
+            "events": data.get("events"),
+            "error": data.get("error"),
+        }, ensure_ascii=False, default=str)
+
+        # ★ 一次 evaluate_js 办两件事：喂数据 + 问高度。
+        #   页面还没就绪（WB_PUSH 未挂上）时返回 0，安静跳过，不当作错误。
+        js = ("(function(){"
+              "if (typeof window.WB_PUSH !== 'function') return 0;"
+              "try { window.WB_PUSH(%s); } catch (e) { return -1; }"
+              "return (typeof window.WB_NEED_H === 'function')"
+              " ? window.WB_NEED_H() : 0;"
+              "})()" % payload)
+        try:
+            want = self._window.evaluate_js(js)
+        except Exception:
+            log_exc("push/evaluate_js")
+            return
+
+        try:
+            # ★ 门槛只能是"大于 0"，**不能是 80**。
+            #   前端的约定是：**返回 0 = 现在别动窗口**（内容还没渲染出来、量不准），
+            #   其余正整数一律是有效高度。而迷你条就是 MINI_H = 62 —— 用 80 当门槛
+            #   会把它当成"没就绪"直接丢掉，于是收起后窗口纹丝不动、停在展开态的高度
+            #   （2026-10-08 实测：前端 `before=expanded after=mini wantH=62 CFG.height=62`
+            #    全部正确，Python 侧却一条 resize 都没有）。
+            if isinstance(want, (int, float)) and want > 0:
+                cur = int(self.cfg.get("height") or 0)
+                if abs(int(want) - cur) > 6:
+                    self.cfg["height"] = int(want)
+                    save_json(STATE_PATH, self.cfg)
+                    # 走已有的窗口操作线程（它是单例），不额外创建线程
+                    self._post_window_op(
+                        "resize", (int(self.cfg.get("width") or 380), int(want)))
+        except Exception:
+            log_exc("push/resize")
+
     def get_board(self) -> dict:
         """读一次看板快照。**没有网络、没有子进程、没有端口**。
 
@@ -484,6 +571,11 @@ class BoardApi:
     def _apply_resize(self, w: int, h: int) -> None:
         if self._window is None:
             return
+        # ★ 记账：这句是"窗口高度到底有没有被改"的唯一现场证据。
+        #   踩过：收起为迷你条时窗口没变矮，但链路上每一段看起来都对 ——
+        #   前端算了 62、Python 也调了 resize，唯独没人验证最终落到多少。
+        #   不记这一行，就只能靠截图猜。
+        log("resize → %dx%d" % (int(w), int(h)))
         self._window.resize(int(w), int(h))
 
     def _apply_on_top(self, flag: bool) -> None:
@@ -549,8 +641,14 @@ class BoardApi:
           · 收起 = 窗口还在，只是变矮，仍占屏幕
           · 最小化 = 窗口隐藏，只留托盘图标，屏幕上完全让开
         用户明确要的是后者 —— 顶栏得有个入口，不能只能靠托盘。
+
+        ★ `_visible` 这个标记不是装饰：窗口隐藏后**绝对不能再碰它的尺寸**。
+          WinForms 在 resize 一个已隐藏的窗口时会把它**重新显示出来** ——
+          表现为"收进托盘后，一有新任务又自己冒出来了"（2026-10-08 用户实测）。
+          因为新任务让内容变高 ⇒ 推送时算出新高度 ⇒ resize ⇒ 窗口被顶出来。
         """
         try:
+            self._visible = False
             if self._window is not None:
                 self._window.hide()
             if self._tray:
@@ -699,6 +797,42 @@ class BoardApi:
 
     # ------------------------------------------------------ 动作
 
+    def task_archive(self, task_id: str) -> dict:
+        """把一张任务卡片归档（从主视图移开，数据保留，可 restore 回来）。"""
+        try:
+            store = self._ensure_store()
+            r = store.archive_task(str(task_id), actor="widget")
+            log("归档任务 %s → %r" % (task_id, r))
+            self._push_once()          # 立刻反映到界面，不等下一个推送周期
+            return r
+        except Exception as e:
+            log_exc("task_archive")
+            return {"ok": False, "error": str(e)}
+
+    def task_delete(self, task_id: str) -> dict:
+        """删除一张任务卡片。**不可恢复**（会同时登记一条 delete 事件）。"""
+        try:
+            store = self._ensure_store()
+            store.delete_task(str(task_id), actor="widget")
+            log("删除任务 %s" % task_id)
+            self._push_once()
+            return {"ok": True, "task_id": task_id}
+        except Exception as e:
+            log_exc("task_delete")
+            return {"ok": False, "error": str(e)}
+
+    def task_restore(self, task_id: str) -> dict:
+        """把归档的任务放回看板（右键菜单里对已归档卡片用）。"""
+        try:
+            store = self._ensure_store()
+            r = store.restore_archived(str(task_id))
+            log("还原任务 %s → %r" % (task_id, r))
+            self._push_once()
+            return r
+        except Exception as e:
+            log_exc("task_restore")
+            return {"ok": False, "error": str(e)}
+
     def open_board(self) -> dict:
         """打开浏览器里的完整看板（用于添加/编辑任务）。
 
@@ -782,6 +916,13 @@ class BoardApi:
             if self._window is None:
                 return {"ok": False, "error": "no window"}
             self._window.show()
+            self._visible = True
+            # 隐藏期间推送是停的（否则 resize 会把窗口顶出来，见 hide_to_tray），
+            # 所以恢复显示后立刻补推一次，不然要干等一个推送周期才有内容。
+            try:
+                self._push_once()
+            except Exception:
+                log_exc("show_window/push")
             # 隐藏再显示一轮之后，最顶层属性在部分环境会丢，重新压一次
             if self.cfg.get("on_top", True):
                 self.set_on_top(True)
@@ -1546,7 +1687,13 @@ def main() -> int:
         width=cfg["width"], height=cfg["height"],
         x=x, y=y,
         resizable=True,
-        min_size=(300, 120),
+        # ★ 最小高度必须**小于迷你条的高度**（MINI_H = 44）。
+        #   踩过（2026-10-08）：这里原先是 120，而收起时只需要 44
+        #   ⇒ 窗口被 WinForms 钳在 120，界面只画了顶部一条、下面 76px 全是空白
+        #     （用户原话"底部依然一大片空白"）。
+        #   ★ 而且日志里 `resize → 301x44` 是**成功**的 ——
+        #     **resize 调用成功 ≠ 窗口真的变成那个尺寸**，别拿它当结果判据。
+        min_size=(300, 40),
         frameless=True,          # 无边框 —— 挂件不该有标题栏
         # ★ 不能用 easy_drag=True：它让**整窗**可拖，于是点击卡片会被当成拖动，
         #   详情页永远打不开（而且不报错，只表现为"点了没反应"）。
@@ -1643,6 +1790,55 @@ def main() -> int:
                 log("--quittest: api.quit() 抛异常 %s: %s" % (type(e).__name__, e))
 
         threading.Thread(target=_quittest, daemon=True).start()
+
+    # ------------------------------------------------------------ 线程数守护
+    # ★ 为什么需要这道保险丝：
+    #   pywebview 每处理一次 JS→Python 调用都会**新起一个 OS 线程**，线程结尾
+    #   要 evaluate_js 回 UI 线程。UI 线程一旦积压，这些线程就卡住**永不退出**。
+    #   2026-10-08 实测：前端每 2 秒 5 次调用 ⇒ 3 小时累积 **12796 个线程 /
+    #   913MB / 118255 个句柄**，界面完全无响应，任务管理器都杀不掉。
+    #
+    #   前端已经砍到每 2 秒 1 次（trace 与 get_board 的成功日志都去掉了），
+    #   但**根因在 pywebview 内部**，我们只能"少触发 + 早发现"，根治不了。
+    #   所以再加一道闸：正常也就 20 个线程上下，越过阈值就重启自己 ——
+    #   总好过烂在原地、连杀都杀不掉。
+    THREAD_LIMIT = 1200          # 正常约 20；卡死那次是 12796，取中间偏保守
+
+    def _thread_guard():
+        while True:
+            time.sleep(60)
+            try:
+                n = threading.active_count()
+            except Exception:
+                continue
+            if n < THREAD_LIMIT:
+                if n >= THREAD_LIMIT // 2:
+                    log("线程数偏高: %d（阈值 %d）" % (n, THREAD_LIMIT))
+                continue
+            log("!! 线程数 %d 越过阈值 %d —— 疑似 pywebview 的调用线程没被回收。"
+                "重启自己去换一个干净进程，避免卡到无响应。" % (n, THREAD_LIMIT))
+            try:
+                # ★ 先拉起新实例再退出。否则挂件会凭空消失，用户下次还得手动开。
+                #   DETACHED_PROCESS 让它脱离本进程，不会跟着一起被收走。
+                subprocess.Popen(
+                    [sys.executable], close_fds=True,
+                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                log("   已拉起新实例")
+            except Exception:
+                log_exc("thread_guard/relaunch")
+            try:
+                api.quit()
+            except Exception:
+                log_exc("thread_guard/quit")
+            return
+
+    threading.Thread(target=_thread_guard, daemon=True,
+                     name="thread-guard").start()
+    log("线程数守护已启动（阈值 %d）" % THREAD_LIMIT)
+
+    # ★ 热路径改成 Python 主动推（见 BoardApi.start_push 上的注释）。
+    #   这是本次修复的正主：让前端在热路径上一次都不调 JS→Python。
+    api.start_push()
     if "--stresstest" in sys.argv:
         def _stress():
             import time as _t

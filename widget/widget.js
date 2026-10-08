@@ -513,6 +513,15 @@
       c.onclick = function () {
         if (opts.onOpenTask) opts.onOpenTask(c.getAttribute('data-task'));
       };
+      // ★ 右键菜单：内容层只负责把 **id 和落点** 交给宿主，菜单本身由宿主画。
+      //   理由是这个项目一贯的分工 —— 渲染层不碰"会改数据的动作"
+      //   （归档/删除都要落库+记事件，属于宿主的事）。
+      c.oncontextmenu = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        if (opts.onTaskMenu) opts.onTaskMenu(c.getAttribute('data-task'), e);
+        return false;
+      };
     });
     // ★ 返回键必须真的能返回。
     //   `data-back` 是详情页那两个「← / ×」上的标记，但**此前没有任何地方

@@ -1148,6 +1148,15 @@ body{display:flex;flex-direction:column}
       c.onclick = function () {
         if (opts.onOpenTask) opts.onOpenTask(c.getAttribute('data-task'));
       };
+      // ★ 右键菜单：内容层只负责把 **id 和落点** 交给宿主，菜单本身由宿主画。
+      //   理由是这个项目一贯的分工 —— 渲染层不碰"会改数据的动作"
+      //   （归档/删除都要落库+记事件，属于宿主的事）。
+      c.oncontextmenu = function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        if (opts.onTaskMenu) opts.onTaskMenu(c.getAttribute('data-task'), e);
+        return false;
+      };
     });
     // ★ 返回键必须真的能返回。
     //   `data-back` 是详情页那两个「← / ×」上的标记，但**此前没有任何地方
@@ -1270,15 +1279,128 @@ function emptyBoard() {
   };
 }
 
+// ★★ TRACE_ON 默认关闭，别随手打开。
+//
+//   pywebview 每处理一次 JS→Python 调用都会**新起一个 OS 线程**，
+//   而那个线程结尾要 evaluate_js 回到 UI 线程；UI 线程一旦处理不过来，
+//   线程就卡在那儿**永不退出**，越积越多、UI 越慢，直到雪崩。
+//
+//   实测（2026-10-08）：前端每 2 秒调 5 次（trace×3 + get_board + get_board 日志），
+//   三个小时累积 **12796 个线程 / 913MB / 118255 个句柄**，
+//   界面完全无响应，任务管理器都杀不掉。
+//
+//   所以日志本身没有对错，**贵在"每次调用都要付一个线程"的代价**：
+//   低于每秒几次的调用可以留着，热路径上每轮都要来的必须去掉。
+//   要排查时把这里改成 true（临时），查完记得改回来。
+var TRACE_ON = false;
+
 function trace(step) {
   BOOT_TRACE.push(step);
   var f = document.getElementById('fstat');
   if (f && !f.textContent.startsWith('共 ')) f.textContent = '启动中… ' + step;
-  // ★ 上报到宿主的日志文件：打包版没有控制台，页面里的进度只有落盘才看得见
+  if (!TRACE_ON) return;   // ← 本地状态照记，只是不再往宿主写日志（那是 IPC）
   try { var a = api(); if (a && a.log) a.log('trace:' + step); } catch (e) {}
 }
 
 function api() { return window.pywebview && window.pywebview.api; }
+
+/* ---------------------------------------------------------- 任务右键菜单
+ *
+ * 两个动作：
+ *   · 归档 —— 打 archived_at 标记，从主视图移开，**数据保留**，可还原
+ *   · 删除 —— **不可恢复**，所以要点两次
+ *
+ * 不用 window.confirm()：WebView2 里它的行为不受控（可能直接返回 false，
+ * 也可能阻塞 UI 线程导致整个挂件不动）。菜单原地二次确认，所见即所得。
+ */
+var MENU_TASK = null;
+
+function closeTaskMenu() {
+  var m = document.getElementById('ctxmenu');
+  if (m && m.parentNode) m.parentNode.removeChild(m);
+  MENU_TASK = null;
+}
+
+function placeMenu(m, x, y) {
+  var w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 6)) + 'px';
+  m.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 6)) + 'px';
+}
+
+var MENU_CSS = 'position:fixed;z-index:99;min-width:132px;padding:4px;'
+  + 'background:var(--bg-2,#241f16);border:1px solid var(--line-2,#4a4130);'
+  + 'border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.45);font-size:12.5px;';
+var MI_CSS = 'padding:7px 10px;border-radius:6px;cursor:pointer;color:var(--fg,#f4efe4);';
+
+function menuItem(label, act, danger) {
+  var d = document.createElement('div');
+  d.setAttribute('data-m', act);
+  d.textContent = label;
+  d.style.cssText = MI_CSS + (danger ? 'color:var(--bad,#ff7a6b);' : '');
+  d.onmouseenter = function () { d.style.background = 'rgba(255,255,255,.07)'; };
+  d.onmouseleave = function () { d.style.background = ''; };
+  return d;
+}
+
+function openTaskMenu(tid, ev) {
+  closeTaskMenu();
+  if (!tid) return;
+  MENU_TASK = tid;
+
+  var m = document.createElement('div');
+  m.id = 'ctxmenu';
+  m.style.cssText = MENU_CSS;
+
+  var a1 = menuItem('归档（可还原）', 'archive');
+  var a2 = menuItem('删除…', 'delete', true);
+  m.appendChild(a1);
+  m.appendChild(a2);
+  document.body.appendChild(m);
+  placeMenu(m, ev ? ev.clientX : 40, ev ? ev.clientY : 40);
+
+  a1.onclick = function (e) {
+    e.stopPropagation(); var id = MENU_TASK; closeTaskMenu(); doArchive(id);
+  };
+  a2.onclick = function (e) {
+    e.stopPropagation();
+    // 就地二次确认：改文案 + 变红，再点一次才真的删
+    if (a2.getAttribute('data-armed') !== '1') {
+      a2.setAttribute('data-armed', '1');
+      a2.textContent = '再点一次：确认删除';
+      placeMenu(m, m.offsetLeft, m.offsetTop);
+      return;
+    }
+    var id = MENU_TASK; closeTaskMenu(); doDelete(id);
+  };
+}
+
+function doArchive(tid) {
+  var a = api();
+  if (!a || !a.task_archive) { setStat('宿主不支持归档', true); return; }
+  a.task_archive(tid).then(function (r) {
+    setStat((r && r.ok) ? '已归档（可在网页看板还原）'
+                        : ('归档失败：' + ((r && r.error) || '未知')), !(r && r.ok));
+  }).catch(function (e) { setStat('归档出错：' + e, true); });
+}
+
+function doDelete(tid) {
+  var a = api();
+  if (!a || !a.task_delete) { setStat('宿主不支持删除', true); return; }
+  a.task_delete(tid).then(function (r) {
+    setStat((r && r.ok) ? '已删除' : ('删除失败：' + ((r && r.error) || '未知')), !(r && r.ok));
+  }).catch(function (e) { setStat('删除出错：' + e, true); });
+}
+
+// 点别处 / 按 Esc / 窗口失焦都收起菜单 —— 不然它会一直挂在那儿
+document.addEventListener('click', function () { closeTaskMenu(); });
+document.addEventListener('contextmenu', function (e) {
+  // 在卡片以外的地方右键也算"点了别处"
+  if (!e.target || !e.target.closest || !e.target.closest('.card')) closeTaskMenu();
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeTaskMenu();
+});
+window.addEventListener('blur', function () { closeTaskMenu(); });
 
 /** 把 bundle 交给 widget.js 并重绘 */
 function applyBundle(r) {
@@ -1306,6 +1428,8 @@ function draw() {
     theme: CFG.theme, width: CFG.width, alpha: CFG.alpha, font: CFG.font,
     taskId: CUR_TASK,
     onOpenTask: function (tid) { CUR_TASK = tid; CUR_STATE = 'detail'; draw(); fitWindow(); },
+    // 右键菜单：内容层把 id + 落点递上来，菜单本身由宿主画（见 openTaskMenu）
+    onTaskMenu: function (tid, ev) { openTaskMenu(tid, ev); },
     // 「返回」是宿主的视图状态，所以由宿主提供实现；内容层只负责画那个箭头
     onBack: function () { CUR_TASK = null; CUR_STATE = 'expanded'; draw(); fitWindow(); }
   });
@@ -1324,6 +1448,16 @@ function draw() {
   bindDrag();
   setSign();
   document.documentElement.style.setProperty('--bg-alpha', CFG.alpha);
+
+  // ★ 收起成迷你条时，把页面**底栏**一起藏掉。
+  //
+  //   实测（2026-10-08）：迷你条本体 42px + 底栏 28px = 70px，却要塞进 62px 的窗口
+  //   ⇒ 挤压并溢出，用户看到的就是"上面一行、下面一行，中间夹一大片空白"。
+  //
+  //   语义上也该这样：迷你条的信息（几个任务/几个卡住）本体那行已经说全了，
+  //   底栏的署名和 ↗⚙ 这些入口在收起态本来也点不到 —— 留着只是占地方。
+  var foot = document.getElementById('foot');
+  if (foot) foot.style.display = (CUR_STATE === 'mini') ? 'none' : '';
 }
 
 /* ---------------------------------------------------------- MCP 注册引导
@@ -1590,7 +1724,7 @@ function markDragArea() {
  *    但它不该管到收起态（收起态的高度是**定值**，跟内容无关）。
  *    所以改成：收起态直接给定值；只有"按内容算"的那条分支才做下限保护。
  */
-var MINI_H = 62;          // 收起态窗口高度（定值，不跟内容走）
+var MINI_H = 44;          // 收起态窗口高度（= 迷你条本体约 42px + 边距）
 
 /** 量出「界面真实需要多高」。
  *
@@ -1635,21 +1769,31 @@ function contentHeight() {
   return total;
 }
 
+/* ★ 这里**不再调 api().resize()**。
+ *
+ *   热路径上不能再有 JS→Python 调用：pywebview 处理每一次这样的调用都会
+ *   新起一个 OS 线程（webview/util.py:335），线程结尾还要 evaluate_js 回 UI 线程。
+ *   实测每 2 秒 5 次调用 ⇒ 3 小时累积 12796 个线程 / 913MB，界面卡死且杀不掉
+ *   （2026-10-08）。
+ *
+ *   现在真正的 resize 统一由 Python 在推送数据之后做：它推完就用**同一次**
+ *   evaluate_js 顺手把 wantHeight() 问回去，一次往返办两件事。
+ */
 function fitWindow() {
-  var h;
-  if (CUR_STATE === 'mini') {
-    h = MINI_H;
-  } else {
-    h = Math.min(contentHeight() + 8, 900);
-    // 内容还没渲染（量出来很小）时不要动窗口，
-    // 否则会把窗口缩成一条缝，而且再也长不回来
-    if (h < 80) return;
-  }
-  if (Math.abs(h - CFG.height) > 6) {
-    CFG.height = h;
-    if (api()) api().resize(CFG.width, h);
-  }
+  var h = wantHeight();
+  if (h > 0) CFG.height = h;
 }
+
+/** 当前希望窗口有多高；返回 0 表示「现在别动窗口」。 */
+function wantHeight() {
+  if (CUR_STATE === 'mini') return MINI_H;
+  var h = Math.min(contentHeight() + 8, 900);
+  // 内容还没渲染（量出来很小）时不要动窗口，否则会缩成一条缝且长不回来
+  return h < 80 ? 0 : h;
+}
+
+// Python 推完数据后调这个取值（与 WB_PUSH 共用一次 evaluate_js）
+window.WB_NEED_H = function () { return wantHeight(); };
 
 function setSign() {
   var el = document.getElementById('fsign');
@@ -1684,37 +1828,23 @@ async function fetchBoard() {
   var t0 = Date.now();
   var r = await a.get_board();
   try {
-    if (a.log) a.log('get_board ' + ((r && r.ok) ? 'OK' : 'FAIL')
-                     + ' in ' + (Date.now() - t0) + 'ms');
+    // ★ 只在**失败**时上报：成功是常态，而每一次调用都要付一个 OS 线程的代价
+    //   （见 trace() 上方那段注释）。正常路径不该在这里花钱。
+    if (a.log && !(r && r.ok)) a.log('get_board FAIL in ' + (Date.now() - t0) + 'ms');
   } catch (e) {}
   return r || { ok: false, error: 'empty' };
 }
 
-async function tick() {
-  var r;
-  try {
-    trace('fetch');
-    r = await fetchBoard();
-    trace(r && r.ok ? (r.not_modified ? 'ok-304' : 'ok-data') : 'fail');
-  } catch (e) {
-    // fetch 抛异常 = 连不上（DNS/拒连/超时）—— 这是「连不上」而不是「没任务」
-    trace('fetch-err');
-    r = { ok: false, unreachable: true, error: (e && e.name) || 'NetworkError' };
-  }
-
+/** 把一份数据渲染出来。**不触发轮询** —— 数据由 Python 主动推。 */
+function renderBoard(r) {
   try {
     if (r && r.ok) {
       FAILS = 0;
-      if (!r.not_modified) {
-        trace('render');
-        applyBundle(r);
-        fitWindow();
-      }
+      applyBundle(r);
+      fitWindow();
       var s2 = (r.board && r.board.stats) || {};
       setStat('共 ' + (s2.total || 0) + ' 个任务'
               + (s2.stalled ? ' · ' + s2.stalled + ' 个卡住' : ''));
-      // 正常态：展开态 2s；收起态降频到 12s（省流，也因为它不显内容）
-      schedule(CUR_STATE === 'mini' ? 12000 : 2000);
     } else {
       FAILS++;
       // ★ 不再切到「连不上看板服务」那种中间态。
@@ -1728,12 +1858,37 @@ async function tick() {
           draw();
         } catch (e) {}
       }
-      setStat('数据读取失败：' + (r && r.error || '未知'), true);
-      schedule(5000);
+      setStat('数据读取失败：' + ((r && r.error) || '未知'), true);
     }
   } catch (e) {
     // 渲染阶段出错：把原因摆出来，而不是留一个空白窗口
     showFatal('渲染失败', ((e && e.stack) || (e && e.message) || String(e)));
+  }
+}
+
+/* ★★ 热路径的方向已经反转：**Python 推、前端收**。
+ *
+ *   原先前端每 2 秒 `await api.get_board()`，那是一次 JS→Python 调用，
+ *   而 pywebview 处理**每一次**这样的调用都会新起一个 OS 线程
+ *   （webview/util.py:335），线程结尾还要 evaluate_js 回 UI 线程。
+ *   实测：每 2 秒 5 次调用 ⇒ 3 小时累积 12796 个线程 / 913MB / 118255 句柄，
+ *   界面完全无响应，任务管理器都杀不掉（2026-10-08 现场实测）。
+ *
+ *   而 **Python 主动调 evaluate_js 是不创建线程的**。
+ *   所以把方向反过来：Python 每 2 秒把数据推进来，顺手把窗口高度问走。
+ *   热路径上**一次 JS→Python 调用都没有了**，那条泄漏通道从根上关掉。
+ *
+ *   设置面板里那些「人点一下才发生」的调用保持原样 —— 频率由人决定，不构成风险。
+ */
+window.WB_PUSH = function (r) { renderBoard(r); };
+
+/** 启动时拉一次，让界面立刻有内容；此后完全被动等推送。 */
+async function tick() {
+  try {
+    renderBoard(await fetchBoard());
+  } catch (e) {
+    // fetch 抛异常 = 桥接还没就绪之类 —— 交给 Python 的第一次推送兜底
+    renderBoard({ ok: false, error: (e && e.name) || 'NetworkError' });
   }
 }
 
